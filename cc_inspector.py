@@ -35,7 +35,7 @@ import threading
 import webbrowser
 from pathlib import Path
 
-__version__ = "0.3.0"
+__version__ = "0.3.1"
 
 HOME = Path.home()
 CLAUDE_DIR = Path(os.environ.get("CLAUDE_CONFIG_DIR", HOME / ".claude"))

@@ -30,6 +30,7 @@ Every pull request runs the tests on macOS, Linux and Windows automatically. You
 | `cc_inspector.py` | Everything on the Python side: scanning (`collect_*` functions and `build()`), health checks (`issue(...)`), actions (`do_action()`), the assistant (`assistant_*` functions and `translate_event()`), the local web server (`serve()`) and the command line (`main()`) |
 | `cc_inspector_ui.html` | The page. Plain HTML, CSS and JavaScript, no build step. The scan result is inserted where `__DATA__` is. `VIEWS` draws each page, `DETAIL` draws the side panel, `ACT` describes the action buttons, and the "Ask Claude" section holds the chat (`sendChat`, `md`, `special`) |
 | `tests/test_cc_inspector.py` | Tests. Each one builds a fake home folder, so your real `~/.claude` is never touched |
+| `scripts/demo_home.py` | Builds a made-up Claude Code setup for demos and screenshots: `python3 scripts/demo_home.py /tmp/cci-demo`, then `HOME=/tmp/cci-demo PATH="/tmp/cci-demo/.local/bin:$PATH" python3 cc_inspector.py --serve` |
 
 ## Ground rules
 

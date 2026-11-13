@@ -151,6 +151,9 @@ const pill = (t, c) => `<span class="pill ${c}">${esc(t)}</span>`;
 const onoff = v => v === true ? pill("on","on-p") : v === false ? pill("off","off-p") : pill("not set","off-p");
 const okc = v => v === true ? pill("found","on-p") : v === false ? pill("missing","error") : '<span class="muted">—</span>';
 const uses = r => r.uses ? `${r.uses}<div class="muted" style="font-size:11px">${esc(r.lastUsed)}</div>` : '<span class="muted">0</span>';
+const PLURAL = {skills: ["skill", "skills"], commands: ["command", "commands"], agents: ["agent", "agents"], hooks: ["hook", "hooks"], mcp: ["MCP server", "MCP servers"]};
+const n_ = (n, one, many) => `${n} ${n === 1 ? one : (many || one + "s")}`;
+const countOf = (k, v) => PLURAL[k] ? n_(v, PLURAL[k][0], PLURAL[k][1]) : `${v} ${k}`;
 const clip = (s, n) => (s = String(s || "")).length > n ? s.slice(0, n) + "…" : s;
 let REG = []; const reg = (k, o) => (REG.push([k, o]), REG.length - 1);
 const state = {tab: "overview", q: "", st: "all"};
@@ -212,13 +215,13 @@ const VIEWS = {
  },
  overview(){
   const cards = [
-   ["issues", "Problems", nErr + nWarn, `${nErr} errors · ${nWarn} warnings`],
+   ["issues", "Problems", nErr + nWarn, `${n_(nErr, "error")} · ${n_(nWarn, "warning")}`],
    ["plugins", "Plugins", S.pluginsInstalled, `${S.pluginsEnabled} enabled`],
    ["skills", "Skills", S.skills, `${S.skillsNeverUsed} never used`],
-   ["mcp", "MCP servers", S.mcp, `${R.mcp.filter(m=>m.ok===false).length} broken command`],
+   ["mcp", "MCP servers", S.mcp, n_(R.mcp.filter(m=>m.ok===false).length, "broken command")],
    ["hooks", "Hooks", S.hooks, `${R.hooks.filter(h=>h.enabled===true).length} active`],
    ["perms", "Permission rules", S.allowRules + S.denyRules, `${S.allowRules} allow · ${S.denyRules} deny`],
-   ["items", "Agents & commands", S.agents + S.commands, `${S.agents} agents · ${S.commands} commands`],
+   ["items", "Agents & commands", S.agents + S.commands, `${n_(S.agents, "agent")} · ${n_(S.commands, "command")}`],
    ["memory", "Memory files", R.memory.length, "loaded every session"],
   ];
   const topSkills = [...R.skills].filter(s => s.uses).sort((a, b) => b.uses - a.uses).slice(0, 8);
@@ -246,7 +249,7 @@ const VIEWS = {
    ["Plugin", r => `<b>${esc(r.name)}</b><div class="muted mono">${esc(r.marketplace)}</div>`],
    ["State", r => onoff(r.enabled) + (r.builtin ? " " + pill("built-in","info") : "") + (r.synced ? " " + pill("claude.ai","info") : "") + (r.exists === false ? " " + pill("missing","error") : "")],
    ["Version", r => esc(r.version || "")],
-   ["Contains", r => Object.entries(r.counts || {}).filter(([k, v]) => v).map(([k, v]) => `${v} ${k}`).join(" · ") || '<span class="muted">—</span>'],
+   ["Contains", r => Object.entries(r.counts || {}).filter(([k, v]) => v).map(([k, v]) => countOf(k, v)).join(" · ") || '<span class="muted">—</span>'],
    ["Uses", uses],
    ["About", r => `<div class="desc">${esc(clip(r.description, 160))}</div>`],
   ], [...R.plugins].sort((a, b) => (b.enabled === true) - (a.enabled === true) || sizeOf(b) - sizeOf(a)), "plugin", true)
@@ -526,21 +529,24 @@ function special(lang, body){
   CAN ? `<button class="btn ${style}" onclick="askAction(${reg("act", [j.kind, o, j.action])})">${esc(label)}…</button>` : `<span class="muted">read-only</span>`}</div>`;
 }
 function md(src){
- const out = []; const parts = String(src).split(/^```/m);
+ const out = []; const parts = String(src).split(/^[ \t]*```/m);   // fences may be indented (inside lists)
  parts.forEach((part, i) => {
   if (i % 2 === 1) {
-   const nl = part.indexOf("\n"), lang = (nl < 0 ? part : part.slice(0, nl)).trim(), body = nl < 0 ? "" : part.slice(nl + 1);
+   const nl = part.indexOf("\n"), lang = (nl < 0 ? part : part.slice(0, nl)).trim();
+   const body = nl < 0 ? "" : part.slice(nl + 1);
    const closed = i < parts.length - 1;
    if (lang.startsWith("cci-")) out.push(closed ? special(lang, body.trim()) : `<div class="typing">Preparing a suggestion</div>`);
    else out.push(`<pre><code>${esc(body.replace(/\n$/, ""))}</code></pre>`);
    return;
   }
   let list = null;
-  const flush = () => { if (list) { out.push(`<${list.t}>${list.items.map(x => `<li>${inlineMd(x)}</li>`).join("")}</${list.t}>`); list = null; } };
+  const flush = () => { if (list) { out.push(`<${list.t}${list.start > 1 ? ` start="${list.start}"` : ""}>${list.items.map(x => `<li>${inlineMd(x)}</li>`).join("")}</${list.t}>`); list = null; } };
   for (const para of esc(part).split(/\n{2,}/)) {
    for (const line of para.split("\n")) {
-    const ul = line.match(/^\s*[-*•] (.*)/), ol = line.match(/^\s*\d+[.)] (.*)/), h = line.match(/^#{1,4} (.*)/);
-    if (ul || ol) { const t = ul ? "ul" : "ol"; if (!list || list.t !== t) { flush(); list = {t, items: []}; } list.items.push((ul || ol)[1]); continue; }
+    const ul = line.match(/^\s*[-*•] (.*)/), ol = line.match(/^\s*(\d+)[.)] (.*)/), h = line.match(/^#{1,4} (.*)/);
+    if (ul || ol) { const t = ul ? "ul" : "ol"; if (!list || list.t !== t) { flush(); list = {t, items: [], start: ol ? +ol[1] : 1}; }
+     list.items.push(ul ? ul[1] : ol[2]); continue; }
+    if (list && /^\s{2,}\S/.test(line)) { list.items[list.items.length - 1] += " " + line.trim(); continue; }   // wrapped list item
     flush();
     if (h) out.push(`<h4>${inlineMd(h[1])}</h4>`); else if (line.trim()) out.push(`<p>${inlineMd(line)}</p>`);
    }

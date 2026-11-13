@@ -5,10 +5,15 @@
 
 See and manage everything that's installed in your [Claude Code](https://claude.com/claude-code) setup on one page: plugins, skills, MCP servers, hooks, permissions, agents, slash commands and memory files. It also runs health checks that find broken or messy config.
 
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/overview-dark.jpg">
+  <img alt="Overview page: problem counts, plugins, skills, MCP servers, a list of what needs attention, and the most-used skills" src="docs/screenshots/overview-light.jpg">
+</picture>
+
 - **One Python file.** No dependencies, nothing to install.
 - **Ask Claude.** Chat with Claude about your setup ("what's broken?", "what can I clean up?"). It uses your existing Claude subscription through Claude Code, so there's no API key. It can read your config but can't change anything; its suggestions become buttons you confirm.
 - **Safe changes.** Turn things on or off, update, sign in, remove, delete. Every change asks you first, uses the official `claude` CLI where one exists, and can be undone where possible. Use `--read-only` to just look.
-- **Private.** It runs only on your computer and sends nothing anywhere. Secret values (env vars, headers, tokens) are hidden in everything it shows.
+- **Private.** It runs only on your computer. Nothing leaves it unless you use Ask Claude, which goes through your own Claude Code login, the same as a normal Claude Code session. Secret values (env vars, headers, tokens) are hidden everywhere.
 
 ## Quick start
 
@@ -21,6 +26,16 @@ python3 cc_inspector.py --serve
 Your browser opens at <http://127.0.0.1:8765>. Press `Ctrl+C` in the terminal to stop it.
 
 Needs Python 3.10 or newer. Works on macOS, Linux and Windows. On Windows, use `py` or `python` instead of `python3`.
+
+## Screenshots
+
+*All screenshots use a made-up demo setup. Recreate it with `python3 scripts/demo_home.py <folder>`.*
+
+| Ask Claude what to fix, and get buttons | Every plugin, with what it contains |
+| --- | --- |
+| ![Ask Claude answering "Is anything broken?" with Turn off, Remove, Delete and Sign in buttons](docs/screenshots/ask-claude-light.jpg) | ![Plugin details panel with Turn off, Update and Uninstall buttons, its skills and hooks](docs/screenshots/plugin-details-light.jpg) |
+| **Health checks with fixes** | **MCP servers and their status** |
+| ![Health checks: two MCP servers whose programs are missing, a pile of settings backups, a skill without a description](docs/screenshots/health-light.jpg) | ![MCP servers table showing where each comes from, whether its command exists, and which need sign-in](docs/screenshots/mcp-light.jpg) |
 
 ## What you get
 
