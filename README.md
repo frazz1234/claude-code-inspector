@@ -19,7 +19,7 @@ python3 cc_inspector.py --serve
 
 Your browser opens at <http://127.0.0.1:8765>. Press `Ctrl+C` in the terminal to stop it.
 
-Needs Python 3.9 or newer. Works on macOS, Linux and Windows. On Windows, use `py` or `python` instead of `python3`.
+Needs Python 3.10 or newer. Works on macOS, Linux and Windows. On Windows, use `py` or `python` instead of `python3`.
 
 ## What you get
 
