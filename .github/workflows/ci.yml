@@ -1,0 +1,49 @@
+name: Tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: ${{ matrix.os }} · Python ${{ matrix.python }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        python: ["3.9", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - name: Unit tests
+        run: python -m unittest discover -s tests -v
+      - name: Command-line smoke test
+        run: |
+          python cc_inspector.py --version
+          python cc_inspector.py --json-only --no-open --out smoke
+          python -c "import json; r = json.load(open('smoke.json', encoding='utf-8')); print('scan ok:', r['stats'])"
+
+  ui:
+    name: UI script parses
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Check the page's JavaScript for syntax errors
+        run: |
+          node -e "
+            const h = require('fs').readFileSync('cc_inspector_ui.html', 'utf8');
+            const js = h.split('<script>')[1].split('</script>')[0]
+              .replace('__DATA__', '{}').replace('__LIVE__', 'false').replace('__TOKEN__', '');
+            new Function(js);
+            console.log('JavaScript OK');
+          "

@@ -1,5 +1,8 @@
 # Claude Code Inspector
 
+[![Tests](https://github.com/frazz1234/claude-code-inspector/actions/workflows/ci.yml/badge.svg)](https://github.com/frazz1234/claude-code-inspector/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+
 See and manage everything that's installed in your [Claude Code](https://claude.com/claude-code) setup on one page: plugins, skills, MCP servers, hooks, permissions, agents, slash commands and memory files. It also runs health checks that find broken or messy config.
 
 - **One Python file.** No dependencies, nothing to install.
@@ -16,7 +19,7 @@ python3 cc_inspector.py --serve
 
 Your browser opens at <http://127.0.0.1:8765>. Press `Ctrl+C` in the terminal to stop it.
 
-Needs Python 3.8 or newer. Works on macOS, Linux and Windows. On Windows, use `py` or `python` instead of `python3`.
+Needs Python 3.9 or newer. Works on macOS, Linux and Windows. On Windows, use `py` or `python` instead of `python3`.
 
 ## What you get
 
@@ -106,7 +109,17 @@ If you set `CLAUDE_CONFIG_DIR`, it reads that folder instead of `~/.claude`.
 
 ## Contributing
 
-Issues and pull requests are welcome. Claude Code's config format changes often, so if something shows up wrong or is missing, please open an issue with your Claude Code version (`claude --version`). Leave out your personal data.
+This is an open-source project, and help is welcome: bug reports, ideas, docs and code.
+
+- **Found a bug or have an idea?** [Open an issue](https://github.com/frazz1234/claude-code-inspector/issues/new/choose). Claude Code's config format changes often, so "this shows up wrong for me" reports are very useful.
+- **Want to change the code?** Read [CONTRIBUTING.md](CONTRIBUTING.md). It's a fork, a branch and a pull request, and the tests run automatically.
+- **Found a security problem?** Report it privately. See [SECURITY.md](SECURITY.md).
+
+To run the tests yourself:
+
+```bash
+python3 -m unittest discover -s tests -v
+```
 
 ## License
 

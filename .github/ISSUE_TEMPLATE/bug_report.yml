@@ -1,0 +1,58 @@
+name: Bug report
+description: Something shows up wrong, is missing, or an action failed
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting! **Please don't paste your full report or settings files.** They can contain your file paths and project names. Short, trimmed snippets are perfect.
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened?
+      description: What did you do, what did you expect, and what happened instead?
+      placeholder: "I opened the MCP servers page and my server 'xyz' is listed as 'missing' even though it runs fine."
+    validations:
+      required: true
+  - type: input
+    id: claude-version
+    attributes:
+      label: Claude Code version
+      description: Output of `claude --version`
+      placeholder: "2.1.322 (Claude Code)"
+    validations:
+      required: true
+  - type: input
+    id: inspector-version
+    attributes:
+      label: Inspector version
+      description: Output of `python3 cc_inspector.py --version`
+      placeholder: "cc_inspector 0.2.0"
+    validations:
+      required: true
+  - type: dropdown
+    id: os
+    attributes:
+      label: Operating system
+      options: [macOS, Linux, Windows, Other]
+    validations:
+      required: true
+  - type: input
+    id: python
+    attributes:
+      label: Python version
+      description: Output of `python3 --version`
+  - type: dropdown
+    id: mode
+    attributes:
+      label: How were you running it?
+      options:
+        - "The app (--serve)"
+        - "One-file HTML report"
+        - "--json-only"
+  - type: textarea
+    id: details
+    attributes:
+      label: Error message or relevant snippet
+      description: Terminal output, a browser console error, or the relevant (trimmed, secret-free) part of a config file.
+      render: text

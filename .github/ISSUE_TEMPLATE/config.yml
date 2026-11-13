@@ -1,0 +1,5 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Security problem
+    url: https://github.com/frazz1234/claude-code-inspector/security/advisories/new
+    about: Please report security issues privately here, not as a public issue.

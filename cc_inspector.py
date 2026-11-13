@@ -121,8 +121,14 @@ def fp(o) -> str:
     return hashlib.sha1(json.dumps(o, sort_keys=True).encode()).hexdigest()[:12]
 
 
+def expand(p: str) -> str:
+    """Expand a leading ~ using HOME (the same home every other function here uses)."""
+    p = str(p)
+    return str(HOME) + p[1:] if p == "~" or p.startswith(("~/", "~\\")) else p
+
+
 def full(p: str) -> Path:
-    return Path(os.path.expanduser(p))
+    return Path(expand(p))
 
 
 def which_cmd(cmd: str | None) -> bool:
@@ -545,7 +551,7 @@ def collect_memory(project: Path | None) -> list[dict]:
     out = []
     for f in files:
         if f.exists():
-            t = f.read_text(errors="replace")
+            t = f.read_text(encoding="utf-8", errors="replace")
             out.append({"path": short(f), "lines": t.count("\n") + 1, "chars": len(t),
                         "preview": t[:600]})
             if len(t) > 40_000:
@@ -680,7 +686,7 @@ DISABLED_DIR = "skills-disabled"   # sibling of skills/; Claude Code doesn't loa
 
 def render_html(rep: dict, live: bool, token: str = "") -> str:
     data = json.dumps(rep, default=str).replace("</", "<\\/")
-    return (UI_FILE.read_text().replace("__DATA__", data).replace("__LIVE__", "true" if live else "false")
+    return (UI_FILE.read_text(encoding="utf-8").replace("__DATA__", data).replace("__LIVE__", "true" if live else "false")
             .replace("__TOKEN__", token))
 
 
@@ -887,7 +893,7 @@ def safe_path(raw: str, project: Path | None) -> Path | None:
         return None
     # Judge the path as written (".." collapsed, symlinks NOT followed), so links you placed
     # inside ~/.claude (e.g. a skill symlinked from elsewhere) open, but "../" escapes don't.
-    logical = Path(os.path.normpath(os.path.abspath(os.path.expanduser(raw))))
+    logical = Path(os.path.normpath(os.path.abspath(expand(raw))))
     roots = [Path(os.path.normpath(os.path.abspath(CLAUDE_DIR)))] + ([Path(os.path.normpath(str(project)))] if project else [])
     if not any(logical == r or r in logical.parents for r in roots):
         return None
@@ -1024,11 +1030,11 @@ def main():
     rep = build(project, a.live)
 
     jpath = Path(a.out + ".json")
-    jpath.write_text(json.dumps(rep, indent=2, default=str))
+    jpath.write_text(json.dumps(rep, indent=2, default=str), encoding="utf-8")
     out = jpath
     if not a.json_only:
         hpath = Path(a.out + ".html")
-        hpath.write_text(render_html(rep, False))
+        hpath.write_text(render_html(rep, False), encoding="utf-8")
         out = hpath
 
     s = rep["stats"]
