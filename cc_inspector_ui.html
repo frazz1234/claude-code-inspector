@@ -1,0 +1,383 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Claude Code Inspector</title>
+<style>
+:root{--bg:#f6f5f1;--panel:#fff;--panel2:#fbfaf7;--ink:#1d1d1b;--mute:#6b6a66;--line:#e5e2da;--accent:#c96442;--accentbg:#f8e9e2;
+--ok:#2f7d4f;--okbg:#e5f2e9;--warn:#9a5d00;--warnbg:#fbf0db;--err:#b3261e;--errbg:#fbe4e2;--info:#3b5ba5;--infobg:#e6ebf8;--chip:#efede7;
+--shadow:0 10px 40px rgba(20,18,12,.18)}
+@media (prefers-color-scheme:dark){:root:not([data-theme=light]){--bg:#191816;--panel:#23221f;--panel2:#1e1d1a;--ink:#ecebe6;--mute:#a09e97;--line:#36342e;--accent:#e08a66;--accentbg:#3a2820;
+--ok:#7cc79a;--okbg:#1d3126;--warn:#e8b45c;--warnbg:#382c16;--err:#f08c84;--errbg:#3b1e1b;--info:#9db4ec;--infobg:#1e263d;--chip:#2d2c27;--shadow:0 10px 40px rgba(0,0,0,.5)}}
+:root[data-theme=dark]{--bg:#191816;--panel:#23221f;--panel2:#1e1d1a;--ink:#ecebe6;--mute:#a09e97;--line:#36342e;--accent:#e08a66;--accentbg:#3a2820;
+--ok:#7cc79a;--okbg:#1d3126;--warn:#e8b45c;--warnbg:#382c16;--err:#f08c84;--errbg:#3b1e1b;--info:#9db4ec;--infobg:#1e263d;--chip:#2d2c27;--shadow:0 10px 40px rgba(0,0,0,.5)}
+*{box-sizing:border-box}
+html,body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Inter,sans-serif}
+button{font:inherit;color:inherit}
+code,.mono{font:12px/1.45 ui-monospace,SFMono-Regular,Menlo,monospace;overflow-wrap:anywhere}
+.app{display:grid;grid-template-columns:232px minmax(0,1fr);min-height:100vh}
+/* sidebar */
+.side{border-right:1px solid var(--line);padding:20px 12px;position:sticky;top:0;height:100vh;overflow:auto;background:var(--panel2)}
+.brand{padding:0 8px 16px}.brand b{font-size:15px;display:block}.brand span{color:var(--mute);font-size:12px}
+.nav button{display:flex;align-items:center;justify-content:space-between;width:100%;border:0;background:none;padding:7px 10px;border-radius:8px;cursor:pointer;text-align:left}
+.nav button:hover{background:var(--chip)}.nav button.on{background:var(--ink);color:var(--bg)}
+.nav .n{font-size:12px;color:var(--mute);font-variant-numeric:tabular-nums}.nav button.on .n{color:inherit;opacity:.7}
+.nav .dot{display:inline-block;min-width:18px;padding:0 5px;border-radius:9px;background:var(--err);color:#fff;font-size:11px;text-align:center}
+.side .foot{margin-top:18px;padding:12px 8px 0;border-top:1px solid var(--line);font-size:12px;color:var(--mute)}
+.side select{width:100%;margin-top:6px;padding:6px;border-radius:8px;border:1px solid var(--line);background:var(--panel);color:var(--ink);font:inherit;font-size:12px}
+/* main */
+main{padding:24px 28px 80px;min-width:0}
+.top{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:18px}
+.top h1{font-size:22px;margin:0 auto 0 0;letter-spacing:-.01em}
+.btn{border:1px solid var(--line);background:var(--panel);border-radius:8px;padding:6px 12px;cursor:pointer;white-space:nowrap}
+.btn:hover{border-color:var(--mute)}.btn.primary{background:var(--accent);border-color:var(--accent);color:#fff}
+.tools{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:12px}
+input[type=search]{flex:1;min-width:180px;border:1px solid var(--line);background:var(--panel);color:var(--ink);border-radius:8px;padding:7px 12px;font:inherit}
+.seg{display:inline-flex;border:1px solid var(--line);border-radius:8px;overflow:hidden;background:var(--panel)}
+.seg button{border:0;background:none;padding:6px 11px;cursor:pointer}.seg button.on{background:var(--chip);font-weight:600}
+h2{font-size:15px;margin:26px 0 10px}h2:first-child{margin-top:0}
+.sub{color:var(--mute);font-size:13px}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:12px;overflow:hidden}
+.tw{overflow-x:auto}table{width:100%;border-collapse:collapse}
+th,td{text-align:left;padding:9px 12px;border-bottom:1px solid var(--line);vertical-align:top}
+th{font-size:12px;color:var(--mute);font-weight:600;background:var(--panel2);white-space:nowrap}
+tr:last-child td{border-bottom:0}tr.click{cursor:pointer}tr.click:hover td{background:var(--panel2)}
+.count{color:var(--mute);font-size:12px;margin-top:6px}
+.pill{display:inline-block;border-radius:999px;padding:1px 8px;font-size:11px;font-weight:600;white-space:nowrap;line-height:18px}
+.on-p,.allow{background:var(--okbg);color:var(--ok)}.off-p{background:var(--chip);color:var(--mute)}
+.error,.deny{background:var(--errbg);color:var(--err)}.warn,.ask{background:var(--warnbg);color:var(--warn)}.info{background:var(--infobg);color:var(--info)}
+.desc{color:var(--mute);font-size:12.5px;max-width:560px}.muted{color:var(--mute)}
+/* overview */
+.stats{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px}
+.stat{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:14px;cursor:pointer;text-align:left}
+.stat:hover{border-color:var(--mute)}.stat .l{color:var(--mute);font-size:12px}.stat b{display:block;font-size:26px;line-height:1.2;font-variant-numeric:tabular-nums;margin:2px 0}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+.issue{display:flex;gap:10px;padding:11px 14px;border-bottom:1px solid var(--line);align-items:flex-start}.issue:last-child{border:0}
+.issue .fix{color:var(--mute);font-size:12.5px;margin-top:2px}
+.bars{padding:8px 14px}.bar{display:grid;grid-template-columns:minmax(0,170px) 1fr 40px;gap:10px;align-items:center;padding:5px 0;cursor:pointer}
+.bar .t{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.bar .track{height:8px;background:var(--chip);border-radius:4px;overflow:hidden}
+.bar .fill{display:block;height:100%;background:var(--accent);border-radius:4px}.bar .v{text-align:right;font-variant-numeric:tabular-nums;color:var(--mute);font-size:12px}
+.kv{display:grid;grid-template-columns:150px minmax(0,1fr);gap:6px 14px;padding:14px}.kv>span:nth-child(odd){color:var(--mute)}
+/* drawer */
+#scrim{position:fixed;inset:0;background:rgba(0,0,0,.25);opacity:0;pointer-events:none;transition:opacity .15s;z-index:9}
+#drawer{position:fixed;top:0;right:0;bottom:0;width:min(620px,100%);background:var(--panel);border-left:1px solid var(--line);box-shadow:var(--shadow);
+transform:translateX(100%);transition:transform .18s ease;z-index:10;display:flex;flex-direction:column}
+body.open #scrim{opacity:1;pointer-events:auto}body.open #drawer{transform:none}
+.dh{display:flex;align-items:flex-start;gap:12px;padding:18px 20px;border-bottom:1px solid var(--line)}
+.dh .t{flex:1;min-width:0}.dh b{font-size:17px;display:block;overflow-wrap:anywhere}.dh .x{border:0;background:var(--chip);border-radius:8px;width:30px;height:30px;cursor:pointer}
+#dbody{overflow:auto;padding:4px 20px 40px;flex:1}
+#dbody h3{font-size:13px;margin:20px 0 8px;color:var(--mute);text-transform:uppercase;letter-spacing:.04em}
+.list a,.lnk{color:var(--accent);text-decoration:none;cursor:pointer}.list a:hover{text-decoration:underline}
+.list{display:flex;flex-wrap:wrap;gap:6px}.list a{background:var(--accentbg);padding:2px 9px;border-radius:999px;font-size:12.5px}
+.box{border:1px solid var(--line);border-radius:10px;overflow:hidden}
+.box .kv{grid-template-columns:120px minmax(0,1fr)}
+pre{margin:0;padding:14px;background:var(--panel2);overflow:auto;font:12px/1.5 ui-monospace,Menlo,monospace;white-space:pre-wrap;overflow-wrap:anywhere;max-height:70vh}
+.fvh{display:flex;align-items:center;gap:8px;padding:8px 12px;background:var(--chip);font-size:12px}
+.fvh code{flex:1}.ls div{padding:6px 12px;border-bottom:1px solid var(--line);display:flex;gap:8px;cursor:pointer}.ls div:hover{background:var(--panel2)}
+.ls .sz{margin-left:auto;color:var(--mute);font-size:12px}
+.note{padding:10px 14px;border-radius:10px;background:var(--infobg);color:var(--info);font-size:13px;margin-top:14px}
+.empty{padding:16px;color:var(--mute)}
+@media (max-width:820px){
+ .app{grid-template-columns:1fr}
+ .side{position:sticky;top:0;height:auto;z-index:5;padding:10px 12px;border-right:0;border-bottom:1px solid var(--line)}
+ .brand,.side .foot{display:none}
+ .nav{display:flex;gap:4px;overflow-x:auto}.nav button{width:auto;white-space:nowrap;gap:6px}
+ main{padding:16px 16px 60px}.tw table{min-width:680px}.grid2{grid-template-columns:1fr}.kv{grid-template-columns:1fr}.box .kv{grid-template-columns:1fr}
+}
+</style></head><body>
+<div class="app">
+ <aside class="side">
+  <div class="brand"><b>Claude Code Inspector</b><span id="ver"></span></div>
+  <div class="nav" id="nav"></div>
+  <div class="foot" id="foot"></div>
+ </aside>
+ <main>
+  <div class="top"><h1 id="title"></h1>
+   <span class="sub" id="scanned"></span>
+   <button class="btn" id="liveBtn" onclick="rescan(true)" title="Runs `claude mcp list` — takes up to a minute">Check MCP connections</button>
+   <button class="btn primary" id="rescanBtn" onclick="rescan(false)">Rescan</button>
+   <button class="btn" onclick="flipTheme()" title="Light / dark">◐</button>
+  </div>
+  <div class="tools" id="tools">
+   <input type="search" id="q" placeholder="Search everything on this page…" oninput="state.q=this.value;draw()">
+   <div class="seg" id="stSeg"><button data-v="all">All</button><button data-v="on">On</button><button data-v="off">Off</button></div>
+  </div>
+  <div id="view"></div>
+ </main>
+</div>
+<div id="scrim" onclick="closeD()"></div>
+<aside id="drawer" aria-label="Details"><div class="dh"><div class="t"><b id="dtitle"></b><span class="sub" id="dsub"></span></div><button class="x" onclick="closeD()" aria-label="Close">✕</button></div><div id="dbody"></div></aside>
+<script>
+const R = __DATA__, LIVE = __LIVE__;
+const $ = s => document.querySelector(s);
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const pill = (t, c) => `<span class="pill ${c}">${esc(t)}</span>`;
+const onoff = v => v === true ? pill("on","on-p") : v === false ? pill("off","off-p") : pill("not set","off-p");
+const okc = v => v === true ? pill("found","on-p") : v === false ? pill("missing","error") : '<span class="muted">—</span>';
+const uses = r => r.uses ? `${r.uses}<div class="muted" style="font-size:11px">${esc(r.lastUsed)}</div>` : '<span class="muted">0</span>';
+const clip = (s, n) => (s = String(s || "")).length > n ? s.slice(0, n) + "…" : s;
+let REG = []; const reg = (k, o) => (REG.push([k, o]), REG.length - 1);
+const state = {tab: "overview", q: "", st: "all"};
+try { Object.assign(state, JSON.parse(localStorage.getItem("cci") || "{}"), {q: ""}); } catch (e) {}
+const save = () => { try { localStorage.setItem("cci", JSON.stringify({tab: state.tab, st: state.st})); } catch (e) {} };
+function flipTheme(){const r=document.documentElement,d=r.dataset.theme==="dark"||(!r.dataset.theme&&matchMedia("(prefers-color-scheme:dark)").matches);r.dataset.theme=d?"light":"dark";try{localStorage.setItem("cci-theme",r.dataset.theme)}catch(e){}}
+try { const t = localStorage.getItem("cci-theme"); if (t) document.documentElement.dataset.theme = t; } catch (e) {}
+
+const S = R.stats, ISS = R.issues;
+const nErr = ISS.filter(i => i.level === "error").length, nWarn = ISS.filter(i => i.level === "warn").length;
+const TABS = [
+ ["overview", "Overview", ""],
+ ["issues", "Health checks", ISS.length],
+ ["plugins", "Plugins", R.plugins.length],
+ ["skills", "Skills", R.skills.length],
+ ["mcp", "MCP servers", R.mcp.length],
+ ["perms", "Permissions", R.permissions.rules.length],
+ ["projects", "Projects", R.permissions.projects.length],
+ ["hooks", "Hooks", R.hooks.length],
+ ["items", "Agents & commands", R.items.length],
+ ["memory", "Memory & settings", R.memory.length + R.settings.length],
+];
+const HAS_STATE = new Set(["plugins", "skills", "mcp", "hooks", "items"]);
+
+$("#ver").textContent = R.install.version || "claude not found";
+$("#scanned").textContent = "Scanned " + R.generatedAt + (R.project ? " · " + R.project : "");
+if (!LIVE) { $("#liveBtn").style.display = "none"; $("#rescanBtn").title = "Static report: run `python3 cc_inspector.py --serve` for live rescans"; }
+$("#foot").innerHTML = LIVE ? `Project to include<select onchange="pickProject(this.value)"><option value="">None (global only)</option>${(R.knownProjects||[]).map(p=>`<option value="${esc(p.full)}" ${p.full===R.projectFull?"selected":""}>${esc(p.short)}</option>`).join("")}</select>
+ <div style="margin-top:10px">Read-only. Secrets are hidden.</div>` : `Static snapshot.<br>Run <code>python3 cc_inspector.py --serve</code> for the live app with file viewer.`;
+function pickProject(p){ const u = new URL(location.href); if (p) u.searchParams.set("project", p); else u.searchParams.delete("project"); location.href = u; }
+function rescan(live){ if (!LIVE) { location.reload(); return; } const u = new URL(location.href); if (live) u.searchParams.set("live","1"); else u.searchParams.delete("live");
+ const b = live ? $("#liveBtn") : $("#rescanBtn"); b.textContent = live ? "Checking… (up to 1 min)" : "Scanning…"; b.disabled = true; location.href = u; }
+
+document.querySelectorAll("#stSeg button").forEach(b => b.onclick = () => { state.st = b.dataset.v; save(); draw(); });
+function go(t){ state.tab = t; state.q = ""; $("#q").value = ""; save(); draw(); window.scrollTo(0, 0); }
+
+function table(cols, rows, kind, useState){
+ const q = state.q.toLowerCase();
+ let f = q ? rows.filter(r => JSON.stringify(r).toLowerCase().includes(q)) : rows;
+ if (useState && state.st !== "all") f = f.filter(r => state.st === "on" ? r.enabled === true : r.enabled !== true);
+ if (!f.length) return `<div class="card"><div class="empty">Nothing here${q || state.st !== "all" ? " for this filter" : ""}.</div></div>`;
+ return `<div class="card tw"><table><thead><tr>${cols.map(c => `<th>${c[0]}</th>`).join("")}</tr></thead><tbody>${
+  f.map(r => `<tr${kind ? ` class="click" onclick="openD(${reg(kind, r)})"` : ""}>${cols.map(c => `<td>${c[1](r)}</td>`).join("")}</tr>`).join("")
+ }</tbody></table></div><div class="count">${f.length === rows.length ? rows.length : f.length + " of " + rows.length} · click a row for details</div>`;
+}
+const issuesBlock = list => `<div class="card">${list.length ? list.map(x => `<div class="issue">${pill(x.level, x.level)}<div><div><b>${esc(x.area)}</b> — ${esc(x.msg)}</div>${x.fix ? `<div class="fix">→ ${esc(x.fix)}</div>` : ""}</div></div>`).join("") : `<div class="issue">${pill("ok","on-p")} Nothing to fix.</div>`}</div>`;
+const srcOf = p => p.src || "";
+const sizeOf = p => Object.values(p.counts || {}).reduce((a, b) => a + b, 0);
+
+const VIEWS = {
+ overview(){
+  const cards = [
+   ["issues", "Problems", nErr + nWarn, `${nErr} errors · ${nWarn} warnings`],
+   ["plugins", "Plugins", S.pluginsInstalled, `${S.pluginsEnabled} enabled`],
+   ["skills", "Skills", S.skills, `${S.skillsNeverUsed} never used`],
+   ["mcp", "MCP servers", S.mcp, `${R.mcp.filter(m=>m.ok===false).length} broken command`],
+   ["hooks", "Hooks", S.hooks, `${R.hooks.filter(h=>h.enabled===true).length} active`],
+   ["perms", "Permission rules", S.allowRules + S.denyRules, `${S.allowRules} allow · ${S.denyRules} deny`],
+   ["items", "Agents & commands", S.agents + S.commands, `${S.agents} agents · ${S.commands} commands`],
+   ["memory", "Memory files", R.memory.length, "loaded every session"],
+  ];
+  const topSkills = [...R.skills].filter(s => s.uses).sort((a, b) => b.uses - a.uses).slice(0, 8);
+  const maxU = Math.max(1, ...topSkills.map(s => s.uses));
+  const bigPlugins = [...R.plugins].filter(p => sizeOf(p)).sort((a, b) => sizeOf(b) - sizeOf(a)).slice(0, 8);
+  const maxP = Math.max(1, ...bigPlugins.map(sizeOf));
+  const i = R.install;
+  return `<div class="stats">${cards.map(c => `<button class="stat" onclick="go('${c[0]}')"><span class="l">${c[1]}</span><b>${c[2]}</b><span class="l">${c[3]}</span></button>`).join("")}</div>
+  <h2>Needs attention</h2>${issuesBlock(ISS.filter(x => x.level !== "info"))}
+  <div class="grid2"><div><h2>Most-used skills</h2><div class="card bars">${topSkills.length ? topSkills.map(s => `<div class="bar" onclick="openD(${reg("skill", s)})"><span class="t">${esc(s.name)}</span><span class="track"><span class="fill" style="width:${s.uses / maxU * 100}%"></span></span><span class="v">${s.uses}</span></div>`).join("") : '<div class="empty">No usage recorded yet.</div>'}</div></div>
+  <div><h2>Biggest plugins <span class="sub">(skills + MCP + hooks + commands)</span></h2><div class="card bars">${bigPlugins.map(p => `<div class="bar" onclick="openD(${reg("plugin", p)})"><span class="t">${esc(p.name)}</span><span class="track"><span class="fill" style="width:${sizeOf(p) / maxP * 100}%"></span></span><span class="v">${sizeOf(p)}</span></div>`).join("")}</div></div></div>
+  <h2>Install</h2><div class="card"><div class="kv">
+   <span>Version</span><span>${esc(i.version)}</span><span>Binary</span><code>${esc(i.binary)}</code>
+   <span>Install method</span><span>${esc(i.installMethod)} · auto-updates ${i.autoUpdates === false ? "off" : "on"}</span>
+   <span>Config folder</span><code>${esc(i.configDir)}</code><span>Startups</span><span>${esc(i.numStartups)} (first version ${esc(i.firstStartVersion)})</span>
+  </div></div>`;
+ },
+ issues(){
+  const q = state.q.toLowerCase();
+  const l = ISS.filter(x => !q || JSON.stringify(x).toLowerCase().includes(q));
+  return issuesBlock(l) + (R.liveMcp ? `<h2>Live MCP connection check</h2><div class="card"><pre>${esc(R.liveMcp)}</pre></div>` : (LIVE ? `<div class="note">Want to know which MCP servers actually connect? Click <b>Check MCP connections</b> at the top.</div>` : ""));
+ },
+ plugins(){
+  return table([
+   ["Plugin", r => `<b>${esc(r.name)}</b><div class="muted mono">${esc(r.marketplace)}</div>`],
+   ["State", r => onoff(r.enabled) + (r.builtin ? " " + pill("built-in","info") : "") + (r.synced ? " " + pill("claude.ai","info") : "") + (r.exists === false ? " " + pill("missing","error") : "")],
+   ["Version", r => esc(r.version || "")],
+   ["Contains", r => Object.entries(r.counts || {}).filter(([k, v]) => v).map(([k, v]) => `${v} ${k}`).join(" · ") || '<span class="muted">—</span>'],
+   ["Uses", uses],
+   ["About", r => `<div class="desc">${esc(clip(r.description, 160))}</div>`],
+  ], [...R.plugins].sort((a, b) => (b.enabled === true) - (a.enabled === true) || sizeOf(b) - sizeOf(a)), "plugin", true)
+  + `<h2>Marketplaces</h2>` + table([
+   ["Name", r => `<b>${esc(r.name)}</b>`], ["Source", r => `${esc(r.type)} <code>${esc(r.where)}</code>`],
+   ["Plugins installed", r => r.plugins], ["Updated", r => esc(r.updated)], ["Folder", r => okc(r.exists)],
+  ], R.marketplaces);
+ },
+ skills(){
+  return table([
+   ["Skill", r => `<b>${esc(r.name)}</b>${r.problems.length ? "<div>" + r.problems.map(p => pill(p, "warn")).join(" ") + "</div>" : ""}`],
+   ["From", r => `<span class="mono">${esc(r.source)}</span>`],
+   ["State", r => onoff(r.enabled)], ["Uses", uses],
+   ["Description", r => `<div class="desc">${esc(clip(r.description, 200))}</div>`],
+  ], [...R.skills].sort((a, b) => (b.enabled === true) - (a.enabled === true) || b.uses - a.uses || a.name.localeCompare(b.name)), "skill", true);
+ },
+ mcp(){
+  return (R.liveMcp ? "" : LIVE ? `<div class="note" style="margin:0 0 12px">“Command” only checks that the program exists. Click <b>Check MCP connections</b> to test real connections.</div>` : "")
+  + table([
+   ["Server", r => `<b>${esc(r.name)}</b>`], ["From", r => `<span class="mono">${esc(r.source)}</span>`],
+   ["Type", r => esc(r.type)], ["State", r => onoff(r.enabled)], ["Command", r => okc(r.ok)],
+   ["Runs / URL", r => `<code>${esc(clip(r.target, 90))}</code>`],
+  ], R.mcp, "mcp", true);
+ },
+ perms(){
+  const p = R.permissions;
+  return `<h2>Rules from settings files</h2>` + table([
+   ["Kind", r => pill(r.kind, r.kind)], ["Rule", r => `<code>${esc(r.rule)}</code>`], ["From", r => esc(r.source)],
+  ], p.rules)
+  + `<h2>Default permission mode</h2>` + table([["Mode", r => `<b>${esc(r.mode)}</b>`], ["From", r => esc(r.source)]], p.modes)
+  + `<h2>Extra folders Claude may access</h2>` + table([["Folder", r => `<code>${esc(r.dir)}</code>`], ["From", r => esc(r.source)], ["Exists", r => okc(r.exists)]], p.dirs)
+  + `<div class="note">Approvals you gave inside a single project are on the <a class="lnk" onclick="go('projects')">Projects</a> tab.</div>`;
+ },
+ projects(){
+  return table([
+   ["Project", r => `<code>${esc(r.path)}</code>${r.exists ? "" : " " + pill("folder gone","off-p")}`],
+   ["Trusted", r => r.trusted ? pill("yes","on-p") : pill("no","off-p")],
+   ["Remembered approvals", r => r.allowedTools.length || '<span class="muted">0</span>'],
+   ["MCP", r => [...r.mcpServers, ...r.enabledMcpjson.map(x => x + " (.mcp.json)")].map(esc).join(", ") || '<span class="muted">—</span>'],
+   ["Last cost", r => r.lastCost ? "$" + Number(r.lastCost).toFixed(2) : '<span class="muted">—</span>'],
+  ], R.permissions.projects, "project");
+ },
+ hooks(){
+  return table([
+   ["Event", r => `<b>${esc(r.event)}</b>`], ["Matcher", r => `<code>${esc(r.matcher)}</code>`],
+   ["From", r => `<span class="mono">${esc(r.source)}</span>`], ["State", r => onoff(r.enabled)],
+   ["Program", r => okc(r.ok)],
+   ["Command", r => `<code>${esc(clip(r.command, 80))}</code>${r.async ? " " + pill("async","info") : ""}`],
+  ], [...R.hooks].sort((a, b) => (b.enabled === true) - (a.enabled === true)), "hook", true);
+ },
+ items(){
+  return table([
+   ["Name", r => `<b>${esc(r.name)}</b>`], ["Kind", r => pill(r.kind, r.kind === "agent" ? "info" : "off-p")],
+   ["From", r => `<span class="mono">${esc(r.source)}</span>`], ["State", r => onoff(r.enabled)],
+   ["Description", r => `<div class="desc">${esc(clip(r.description, 200))}</div>`],
+  ], R.items, "item", true);
+ },
+ memory(){
+  return `<h2>Memory files <span class="sub">(added to every session)</span></h2>` + table([
+   ["File", r => `<code>${esc(r.path)}</code>`], ["Size", r => `${r.lines} lines · ${r.chars.toLocaleString()} chars`],
+   ["Starts with", r => `<div class="desc">${esc(clip(r.preview.replace(/\s+/g, " "), 140))}</div>`],
+  ], R.memory, "memory")
+  + `<h2>Settings files</h2>` + table([
+   ["Scope", r => `<b>${esc(r.scope)}</b>`], ["File", r => `<code>${esc(r.path)}</code>`],
+   ["Keys", r => `<div class="desc">${r.keys.map(esc).join(", ")}</div>`],
+  ], R.settings, "settings");
+ },
+};
+
+/* ── drawer ── */
+const kv = rows => `<div class="box"><div class="kv">${rows.filter(r => r[1] !== undefined && r[1] !== "" && r[1] !== null).map(r => `<span>${r[0]}</span><span>${r[1]}</span>`).join("")}</div></div>`;
+const links = (kind, arr, label) => arr.length ? `<div class="list">${arr.map(o => `<a onclick="openD(${reg(kind, o)})">${esc(label(o))}</a>`).join("")}</div>` : '<span class="muted">None</span>';
+const fileBtns = (path, isDir) => LIVE && path ? `<div style="display:flex;gap:8px;margin-top:12px">${isDir ? "" : `<button class="btn" onclick="viewFile(${reg("p", path)})">Open file</button>`}<button class="btn" onclick="browse(${reg("p", path)})">Browse folder</button></div>` : (!LIVE && path ? `<div class="count">Run with <code>--serve</code> to open files here.</div>` : "");
+const scriptIn = cmd => { const m = String(cmd || "").match(/["']?((?:~|\/)[^"'\s]+\.(?:sh|py|js|mjs|cjs|ts|rb))["']?/); return m ? m[1] : null; };
+
+const DETAIL = {
+ plugin(p){
+  const src = srcOf(p), sk = R.skills.filter(s => s.source === src), mc = R.mcp.filter(m => m.source === src),
+        hk = R.hooks.filter(h => h.source === src), it = R.items.filter(x => x.source === src);
+  return [p.name, p.marketplace, `
+   <p>${esc(p.description) || '<span class="muted">No description.</span>'}</p>
+   ${kv([["State", onoff(p.enabled) + (p.enabledIn ? ` <span class="muted">in ${esc(p.enabledIn)}</span>` : "")], ["Version", esc(p.version)], ["Author", esc(p.author)],
+        ["Homepage", p.homepage ? `<code>${esc(p.homepage)}</code>` : ""], ["Installed", esc(p.installedAt)], ["Updated", esc(p.updatedAt)],
+        ["Used", p.uses ? `${p.uses} times · last ${esc(p.lastUsed)}` : "never"], ["Folder", p.path ? `<code>${esc(p.path)}</code>` : ""]])}
+   ${fileBtns(p.path ? p.path + "/" : "", true)}
+   <h3>Skills (${sk.length})</h3>${links("skill", sk, s => s.name.replace(p.name + ":", ""))}
+   <h3>MCP servers (${mc.length})</h3>${links("mcp", mc, m => m.name)}
+   <h3>Hooks (${hk.length})</h3>${links("hook", hk, h => h.event + (h.matcher !== "*" ? " · " + h.matcher : ""))}
+   <h3>Agents & commands (${it.length})</h3>${links("item", it, x => x.name)}
+   ${p.enabled !== true && !p.builtin ? `<h3>Turn it on</h3><pre>claude plugin enable ${esc(p.id)}</pre>` : p.builtin || p.synced ? "" : `<h3>Turn it off</h3><pre>claude plugin disable ${esc(p.id)}</pre>`}`];
+ },
+ skill(s){
+  const owner = R.plugins.find(p => p.src && p.src === s.source);
+  return [s.name, s.source, `
+   ${s.problems.length ? `<p>${s.problems.map(x => pill(x, "warn")).join(" ")}</p>` : ""}
+   <p>${esc(s.description)}</p>
+   ${kv([["State", onoff(s.enabled)], ["Used", s.uses ? `${s.uses} times · last ${esc(s.lastUsed)}` : "never"], ["Plugin", owner ? `<a class="lnk" onclick="openD(${reg("plugin", owner)})">${esc(owner.name)}</a>` : ""],
+        ["Allowed tools", s.allowedTools ? `<code>${esc(s.allowedTools)}</code>` : ""], ["Model", esc(s.model)], ["Files", s.files], ["Folder", `<code>${esc(s.dir)}</code>`],
+        ["Description", `${s.descLen} chars`]])}
+   <p class="count">Invoke it with <code>/${esc(s.name)}</code> or just describe the task.</p>
+   ${LIVE ? `<div id="autoF"></div>` : fileBtns(s.dir)}`, () => LIVE && viewFile(reg("p", s.dir + "/SKILL.md"), "#autoF", s.dir)];
+ },
+ mcp(m){
+  const owner = R.plugins.find(p => p.src && p.src === m.source);
+  return [m.name, m.source, `${kv([["Type", esc(m.type)], ["State", onoff(m.enabled)], ["Command", okc(m.ok)],
+   ["Runs / URL", `<code>${esc(m.target)}</code>`], ["Env vars", m.env.map(e => `<code>${esc(e)}</code>`).join(", ")], ["Headers", m.headers.map(e => `<code>${esc(e)}</code>`).join(", ")],
+   ["Plugin", owner ? `<a class="lnk" onclick="openD(${reg("plugin", owner)})">${esc(owner.name)}</a>` : ""]])}
+   ${m.ok === false ? `<div class="note" style="background:var(--errbg);color:var(--err)">The program this server starts isn't installed, so it can't connect.</div>` : ""}
+   <p class="count">Values of env vars and headers are hidden on purpose.</p>`];
+ },
+ hook(h){
+  const sc = scriptIn(h.command), owner = R.plugins.find(p => p.src && p.src === h.source);
+  return [h.event, h.source, `${kv([["Matcher", `<code>${esc(h.matcher)}</code>`], ["Type", esc(h.type)], ["State", onoff(h.enabled)], ["Program", okc(h.ok)],
+   ["Timeout", h.timeout ? h.timeout + " s" : ""], ["Async", h.async ? "yes" : ""], ["Plugin", owner ? `<a class="lnk" onclick="openD(${reg("plugin", owner)})">${esc(owner.name)}</a>` : ""]])}
+   <h3>Command</h3><pre>${esc(h.command)}</pre>${sc ? (LIVE ? `<div id="autoF"></div>` : fileBtns(sc)) : ""}`,
+   () => sc && LIVE && viewFile(reg("p", sc), "#autoF")];
+ },
+ item(x){
+  return [x.name, x.kind + " · " + x.source, `<p>${esc(x.description)}</p>${kv([["State", onoff(x.enabled)], ["Model", esc(x.model)], ["Tools", x.tools ? `<code>${esc(x.tools)}</code>` : ""], ["File", `<code>${esc(x.path)}</code>`]])}
+   ${LIVE ? `<div id="autoF"></div>` : ""}`, () => LIVE && viewFile(reg("p", x.path), "#autoF")];
+ },
+ project(p){
+  return [p.path, p.exists ? "project" : "folder no longer exists", `${kv([["Trusted", p.trusted ? "yes" : "no"], ["Last session cost", p.lastCost ? "$" + Number(p.lastCost).toFixed(2) : ""],
+   ["MCP servers", p.mcpServers.join(", ")], ["Enabled from .mcp.json", p.enabledMcpjson.join(", ")], ["Disabled from .mcp.json", p.disabledMcpjson.join(", ")]])}
+   <h3>Remembered approvals (${p.allowedTools.length})</h3>${p.allowedTools.length ? `<pre>${p.allowedTools.map(esc).join("\n")}</pre>` : '<span class="muted">None. Approvals usually live in the project’s .claude/settings.local.json — pick it as the project in the sidebar to scan it.</span>'}`];
+ },
+ memory(m){ return [m.path.split("/").pop(), m.path, LIVE ? `<div id="autoF"></div>` : `<pre>${esc(m.preview)}${m.chars > 600 ? "\n…" : ""}</pre>`, () => LIVE && viewFile(reg("p", m.path), "#autoF")]; },
+ settings(s){ return [s.scope + " settings", s.path, `<pre>${esc(JSON.stringify(s.data, null, 2))}</pre><p class="count">env values are hidden.</p>`]; },
+};
+
+function openD(i){
+ const [kind, o] = REG[i];
+ const [t, sub, body, after] = DETAIL[kind](o);
+ $("#dtitle").textContent = t; $("#dsub").textContent = sub || "";
+ $("#dbody").innerHTML = body + `<div id="fv"></div>`; $("#dbody").scrollTop = 0;
+ document.body.classList.add("open");
+ if (after) after();
+}
+function closeD(){ document.body.classList.remove("open"); }
+addEventListener("keydown", e => { if (e.key === "Escape") closeD(); });
+
+async function viewFile(i, target = "#fv", dirForBrowse){
+ const path = REG[i][1], el = $(target); if (!el) return;
+ el.innerHTML = `<h3>File</h3><div class="box"><div class="empty">Loading…</div></div>`;
+ try {
+  const r = await (await fetch("/api/file?path=" + encodeURIComponent(path) + projQ())).json();
+  if (r.error) { el.innerHTML = `<h3>File</h3><div class="box"><div class="empty">${esc(r.error)}</div></div>`; return; }
+  const parent = path.replace(/\/[^/]*$/, "");
+  el.innerHTML = `<h3>File</h3><div class="box"><div class="fvh"><code>${esc(r.path)}</code><a class="lnk" onclick="browse(${reg("p", dirForBrowse || parent)})">Browse folder</a></div>${
+   r.binary ? `<div class="empty">Binary file (${r.size} bytes)</div>` : `<pre>${esc(r.content)}${r.truncated ? "\n\n… (truncated)" : ""}</pre>`}</div>`;
+  if (target === "#fv") el.scrollIntoView({behavior: "smooth", block: "start"});
+ } catch (e) { el.innerHTML = `<div class="empty">Couldn’t load: ${esc(e)}</div>`; }
+}
+async function browse(i){
+ const path = REG[i][1].replace(/\/$/, ""), el = $("#fv");
+ el.innerHTML = `<h3>Folder</h3><div class="box"><div class="empty">Loading…</div></div>`;
+ const r = await (await fetch("/api/ls?path=" + encodeURIComponent(path) + projQ())).json();
+ if (r.error) { el.innerHTML = `<h3>Folder</h3><div class="box"><div class="empty">${esc(r.error)}</div></div>`; return; }
+ const up = path.replace(/\/[^/]*$/, "");
+ el.innerHTML = `<h3>Folder</h3><div class="box"><div class="fvh"><code>${esc(r.path)}</code></div><div class="ls">
+  <div onclick="browse(${reg("p", up)})">↰ <span>..</span></div>
+  ${r.entries.map(e => `<div onclick="${e.dir ? "browse" : "viewFile"}(${reg("p", r.path + "/" + e.name)})">${e.dir ? "📁" : "📄"} <span>${esc(e.name)}</span>${e.size != null ? `<span class="sz">${e.size < 1024 ? e.size + " B" : (e.size / 1024).toFixed(1) + " KB"}</span>` : ""}</div>`).join("")}
+ </div></div>`;
+ el.scrollIntoView({behavior: "smooth", block: "start"});
+}
+function projQ(){ const p = new URL(location.href).searchParams.get("project"); return p ? "&project=" + encodeURIComponent(p) : ""; }
+
+function draw(){
+ REG = [];
+ if (!VIEWS[state.tab]) state.tab = "overview";
+ $("#nav").innerHTML = TABS.map(t => `<button class="${t[0] === state.tab ? "on" : ""}" onclick="go('${t[0]}')"><span>${t[1]}</span>${
+  t[0] === "issues" && nErr ? `<span class="dot">${nErr}</span>` : `<span class="n">${t[2]}</span>`}</button>`).join("");
+ $("#title").textContent = TABS.find(t => t[0] === state.tab)[1];
+ $("#stSeg").style.display = HAS_STATE.has(state.tab) ? "" : "none";
+ $("#tools").style.display = state.tab === "overview" ? "none" : "";
+ document.querySelectorAll("#stSeg button").forEach(b => b.classList.toggle("on", b.dataset.v === state.st));
+ $("#view").innerHTML = VIEWS[state.tab]();
+}
+draw();
+</script></body></html>

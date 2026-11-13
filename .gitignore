@@ -1,0 +1,14 @@
+# Generated reports contain your personal Claude Code setup — never commit them
+claude-code-report*.html
+claude-code-report*.json
+*.report.html
+*.report.json
+
+# Local dev config
+.claude/
+
+# Python / OS noise
+__pycache__/
+*.pyc
+.DS_Store
+Thumbs.db
