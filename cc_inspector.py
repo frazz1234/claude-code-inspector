@@ -1,14 +1,16 @@
 #!/usr/bin/env python3
 """
-cc_inspector — audit a Claude Code install.
+cc_inspector — audit and manage a Claude Code install.
 
 Scans ~/.claude, ~/.claude.json, managed settings and (optionally) a project
 folder, then writes a self-contained HTML report + JSON dump covering:
   version, settings files, permissions, plugins & marketplaces, skills,
   agents, slash commands, MCP servers, hooks, memory files, and health checks.
 
-Read-only: it never changes any config. Secrets (env values, headers, tokens)
-are redacted in the output.
+Scanning is read-only. In --serve mode the app can also turn plugins/skills on
+or off, update, sign in to MCP servers, and remove things. Every change is
+confirmed in the UI first; --read-only turns all of that off. Secrets (env
+values, headers, tokens) are redacted in the output.
 
 Usage:
   python3 cc_inspector.py --serve             # local app at http://127.0.0.1:8765
@@ -21,7 +23,9 @@ from __future__ import annotations
 
 import argparse
 import datetime as dt
+import hashlib
 import json
+import secrets
 import os
 import re
 import shutil
@@ -31,7 +35,7 @@ import threading
 import webbrowser
 from pathlib import Path
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"
 
 HOME = Path.home()
 CLAUDE_DIR = Path(os.environ.get("CLAUDE_CONFIG_DIR", HOME / ".claude"))
@@ -112,6 +116,15 @@ def parse_frontmatter(path: Path) -> dict:
     return out
 
 
+def fp(o) -> str:
+    """Short fingerprint, used to make sure an item hasn't changed between scan and action."""
+    return hashlib.sha1(json.dumps(o, sort_keys=True).encode()).hexdigest()[:12]
+
+
+def full(p: str) -> Path:
+    return Path(os.path.expanduser(p))
+
+
 def which_cmd(cmd: str | None) -> bool:
     if not cmd:
         return False
@@ -171,7 +184,7 @@ def collect_settings(project: Path | None) -> list[dict]:
         safe = {k: v for k, v in data.items() if k not in ("env", "apiKeyHelper")}
         if "env" in data:
             safe["env"] = redact_map(data["env"])
-        out.append({"scope": scope, "path": short(p), "keys": sorted(data.keys()), "data": safe})
+        out.append({"scope": scope, "path": short(p), "file": str(p), "keys": sorted(data.keys()), "data": safe})
     # backup clutter
     backups = list(CLAUDE_DIR.glob("settings.json.*"))
     if len(backups) > 20:
@@ -192,8 +205,10 @@ def collect_permissions(settings: list[dict], cj: dict) -> dict:
     for s in settings:
         perm = s["data"].get("permissions") or {}
         for kind in ("allow", "ask", "deny"):
-            for r in perm.get(kind, []) or []:
-                rules.append({"kind": kind, "rule": redact_str(r), "source": s["scope"]})
+            for idx, r in enumerate(perm.get(kind, []) or []):
+                rules.append({"kind": kind, "rule": redact_str(r), "source": s["scope"],
+                              "ref": f"{s['file']}|{kind}|{idx}|{fp(r)}",
+                              "act": [] if s["scope"] == "managed" else ["remove"]})
         if perm.get("defaultMode"):
             modes.append({"mode": perm["defaultMode"], "source": s["scope"]})
         for d in perm.get("additionalDirectories", []) or []:
@@ -354,6 +369,8 @@ def collect_plugins(settings: list[dict], cj: dict, usage: dict):
             "homepage": manifest.get("homepage") or manifest.get("repository"),
             "path": short(root), "exists": root.is_dir(),
             "builtin": False, "src": f"plugin:{pid}",
+            "ref": pid, "projectPath": e.get("projectPath"),
+            "act": (["disable"] if on else ["enable"]) + ["update", "uninstall"],
         }
         if not root.is_dir():
             issue("error", "plugins", f"Plugin {pid} is registered but its folder is missing ({short(root)}).",
@@ -375,7 +392,7 @@ def collect_plugins(settings: list[dict], cj: dict, usage: dict):
             items += [dict(i, enabled=on) for i in scan_md_items(root / "commands", f"plugin:{pid}", "command")]
             items += [dict(i, enabled=on) for i in scan_md_items(root / "agents", f"plugin:{pid}", "agent")]
             for n, cfg in comps["mcp"].items():
-                mcps.append(mcp_record(n, cfg, f"plugin:{pid}", enabled=on))
+                mcps.append(mcp_record(n, cfg, f"plugin:{pid}", enabled=on, scope="plugin", cli=f"plugin:{name}:{n}"))
             for ev, lst in (comps["hooks"] or {}).items():
                 hooks += hook_records(ev, lst, f"plugin:{pid}", root, enabled=on)
 
@@ -398,6 +415,7 @@ def collect_plugins(settings: list[dict], cj: dict, usage: dict):
             "version": manifest.get("version"), "scope": "claude.ai", "enabled": True, "enabledIn": "claude.ai account",
             "description": manifest.get("description", ""), "homepage": manifest.get("homepage"),
             "path": short(root), "exists": True, "builtin": False, "synced": True, "src": f"claude.ai:{name}",
+            "act": [], "manageNote": "This plugin is synced from your claude.ai account. Turn it on or off, or remove it, in claude.ai.",
             "counts": {k: len(v) for k, v in comps.items()},
         })
         sk = manifest.get("skills")
@@ -408,7 +426,7 @@ def collect_plugins(settings: list[dict], cj: dict, usage: dict):
         items += [dict(i, enabled=True) for i in scan_md_items(root / "commands", f"claude.ai:{name}", "command")]
         items += [dict(i, enabled=True) for i in scan_md_items(root / "agents", f"claude.ai:{name}", "agent")]
         for n, cfg in comps["mcp"].items():
-            mcps.append(mcp_record(n, cfg, f"claude.ai:{name}"))
+            mcps.append(mcp_record(n, cfg, f"claude.ai:{name}", scope="plugin", cli=f"plugin:{name}:{n}"))
         for ev, lst in (comps["hooks"] or {}).items():
             hooks += hook_records(ev, lst, f"claude.ai:{name}", root)
 
@@ -417,7 +435,8 @@ def collect_plugins(settings: list[dict], cj: dict, usage: dict):
             builtin = pid.endswith("@builtin")
             plugins.append({"id": pid, "name": pid.partition("@")[0], "marketplace": pid.partition("@")[2],
                             "enabled": on, "enabledIn": scope, "builtin": builtin, "exists": builtin,
-                            "counts": {}, "description": "Built-in plugin shipped with Claude Code" if builtin else ""})
+                            "counts": {}, "description": "Built-in plugin shipped with Claude Code" if builtin else "",
+                            "ref": pid, "act": (["disable"] if on else ["enable"]) if builtin else (["disable"] if on else [])})
             if not builtin and on:
                 issue("error", "plugins", f"{pid} is enabled in {scope} settings but not installed.",
                       f"claude plugin install {pid}  — or remove it from enabledPlugins.")
@@ -440,7 +459,8 @@ def collect_plugins(settings: list[dict], cj: dict, usage: dict):
     return plugins, mk, skills, items, mcps, hooks
 
 
-def mcp_record(name: str, cfg: dict, source: str, enabled=True) -> dict:
+def mcp_record(name: str, cfg: dict, source: str, enabled=True, scope: str = "", cli: str | None = None,
+               project_path: str | None = None) -> dict:
     cfg = cfg or {}
     t = cfg.get("type") or ("http" if cfg.get("url") else "stdio")
     cmd = cfg.get("command")
@@ -451,6 +471,10 @@ def mcp_record(name: str, cfg: dict, source: str, enabled=True) -> dict:
         "headers": sorted((cfg.get("headers") or {}).keys()),
         "enabled": enabled,
         "ok": None,
+        "scope": scope, "cliName": cli or name, "projectPath": project_path,
+        "ref": f"{scope}|{project_path or ''}|{name}|{source}",
+        "act": (["remove"] if scope in ("user", "local", "project") else [])
+               + (["login", "logout"] if t in ("http", "sse") and scope != "managed" else []),
     }
     if t == "stdio" and cmd:
         expanded = cmd.replace("${CLAUDE_PLUGIN_ROOT}", "")
@@ -462,18 +486,18 @@ def mcp_record(name: str, cfg: dict, source: str, enabled=True) -> dict:
 
 
 def collect_mcp(cj: dict, project: Path | None) -> list[dict]:
-    out = [mcp_record(n, c, "user (~/.claude.json)") for n, c in (cj.get("mcpServers") or {}).items()]
+    out = [mcp_record(n, c, "user (~/.claude.json)", scope="user") for n, c in (cj.get("mcpServers") or {}).items()]
     for path, pdata in (cj.get("projects") or {}).items():
         for n, c in (pdata.get("mcpServers") or {}).items():
-            out.append(mcp_record(n, c, f"local: {short(path)}"))
+            out.append(mcp_record(n, c, f"local: {short(path)}", scope="local", project_path=path))
     if project:
         mj = load_json(project / ".mcp.json") or {}
         for n, c in (mj.get("mcpServers") or {}).items():
-            out.append(mcp_record(n, c, "project .mcp.json"))
+            out.append(mcp_record(n, c, "project .mcp.json", scope="project", project_path=str(project)))
     for p in MANAGED_MCP:
         mj = load_json(p) or {}
         for n, c in (mj.get("mcpServers") or {}).items():
-            out.append(mcp_record(n, c, "managed"))
+            out.append(mcp_record(n, c, "managed", scope="managed"))
     cache = load_json(CLAUDE_DIR / "mcp-needs-auth-cache.json")
     if isinstance(cache, dict) and cache:
         names = list(cache.keys())
@@ -482,15 +506,18 @@ def collect_mcp(cj: dict, project: Path | None) -> list[dict]:
     return out
 
 
-def hook_records(event: str, lst, source: str, root: Path | None = None, enabled=True) -> list[dict]:
+def hook_records(event: str, lst, source: str, root: Path | None = None, enabled=True, ref_file: str | None = None) -> list[dict]:
     out = []
-    for group in lst or []:
+    for gi, group in enumerate(lst or []):
         matcher = group.get("matcher", "*") if isinstance(group, dict) else "*"
-        for h in (group.get("hooks", []) if isinstance(group, dict) else []):
+        for hi, h in enumerate(group.get("hooks", []) if isinstance(group, dict) else []):
             cmd = h.get("command", "") or h.get("prompt", "")
             rec = {"event": event, "matcher": matcher or "*", "type": h.get("type"), "command": redact_str(cmd),
                    "timeout": h.get("timeout"), "async": h.get("async", False), "source": source, "enabled": enabled,
-                   "ok": None}
+                   "ok": None, "act": []}
+            if ref_file:
+                rec["ref"] = f"{ref_file}|{event}|{gi}|{hi}|{fp(h)}"
+                rec["act"] = ["remove"]
             if h.get("type") == "command" and cmd:
                 c = cmd.replace("${CLAUDE_PLUGIN_ROOT}", str(root or "")).replace("$CLAUDE_PLUGIN_ROOT", str(root or ""))
                 c = c.replace("$HOME", str(HOME)).replace("~", str(HOME), 1) if c.startswith(("~", "$HOME")) else c
@@ -530,16 +557,36 @@ def collect_memory(project: Path | None) -> list[dict]:
 def collect_local_hooks(settings: list[dict]) -> list[dict]:
     out = []
     for s in settings:
+        editable = s["file"] if s["scope"] != "managed" else None
         for ev, lst in (s["data"].get("hooks") or {}).items():
-            out += hook_records(ev, lst, f"settings:{s['scope']}")
+            out += hook_records(ev, lst, f"settings:{s['scope']}", ref_file=editable)
         sl = s["data"].get("statusLine")
         if isinstance(sl, dict) and sl.get("command"):
-            out += hook_records("statusLine", [{"hooks": [{"type": "command", "command": sl["command"]}]}], f"settings:{s['scope']}")
+            recs = hook_records("statusLine", [{"hooks": [{"type": "command", "command": sl["command"]}]}], f"settings:{s['scope']}")
+            for r in recs:
+                if editable:
+                    r["ref"] = f"{editable}|statusLine|0|0|{fp(sl)}"
+                    r["act"] = ["remove"]
+            out += recs
     return out
 
 
 def live_mcp() -> str:
     return run(["claude", "mcp", "list"], timeout=90)
+
+
+def parse_mcp_list(text: str) -> dict:
+    """`claude mcp list` prints `NAME: TARGET - STATUS`; NAME may contain colons but no ': '."""
+    out = {}
+    for line in text.splitlines():
+        if ": " not in line or " - " not in line:
+            continue
+        name = line.split(": ", 1)[0].strip()
+        st = line.rsplit(" - ", 1)[1].strip()
+        kind = ("connected" if "Connected" in st else "auth" if "authentication" in st.lower()
+                else "failed" if "Failed" in st or "✘" in st else "off" if "Not configured" in st else "other")
+        out[name] = {"status": kind, "text": st.lstrip("✔✘!- ").strip()}
+    return out
 
 
 # ───────────────────────── report ─────────────────────────
@@ -553,11 +600,21 @@ def build(project: Path | None, live: bool) -> dict:
     perms = collect_permissions(settings, cj)
     plugins, markets, pskills, pitems, pmcp, phooks = collect_plugins(settings, cj, usage)
 
-    skills = scan_skill_dir(CLAUDE_DIR / "skills", "user (~/.claude/skills)", usage)
-    if project:
-        skills += scan_skill_dir(project / ".claude/skills", "project", usage)
-    for s in skills:
-        s["enabled"] = True
+    skills = []
+    bases = [(CLAUDE_DIR, "user (~/.claude/skills)")] + ([(project / ".claude", "project")] if project else [])
+    for base, label in bases:
+        for s in scan_skill_dir(base / "skills", label, usage):
+            own = full(s["dir"]).parent == base / "skills"   # not synced / nested
+            s.update(enabled=True, ref=s["dir"], act=["disable", "delete"] if own else [])
+            if not own:
+                s["manageNote"] = "Synced from your claude.ai account. Manage it in claude.ai."
+            skills.append(s)
+        for s in scan_skill_dir(base / DISABLED_DIR, label.split(" ")[0] + " (turned off)", usage):
+            s.update(enabled=False, ref=s["dir"], act=["enable", "delete"])
+            skills.append(s)
+    for s in pskills:
+        s["act"] = []
+        s["manageNote"] = "Part of a plugin. Turn the whole plugin on or off from its page."
     skills += pskills
 
     names: dict[str, list] = {}
@@ -576,10 +633,19 @@ def build(project: Path | None, live: bool) -> dict:
     if project:
         items += scan_md_items(project / ".claude/commands", "project", "command") + scan_md_items(project / ".claude/agents", "project", "agent")
     for i in items:
-        i["enabled"] = True
+        i.update(enabled=True, ref=i["path"], act=["delete"])
+    for i in pitems:
+        i.update(act=[], manageNote="Part of a plugin. Turn the whole plugin on or off from its page.")
     items += pitems
 
     mcp = collect_mcp(cj, project) + pmcp
+    needs_auth = load_json(CLAUDE_DIR / "mcp-needs-auth-cache.json") or {}
+    for m in mcp:
+        m["needsAuth"] = m["cliName"] in needs_auth
+    if live:
+        status = parse_mcp_list(live_mcp_out := live_mcp())
+        for m in mcp:
+            m["live"] = status.get(m["cliName"])
     hooks = collect_local_hooks(settings) + phooks
     memory = collect_memory(project)
 
@@ -602,18 +668,191 @@ def build(project: Path | None, live: bool) -> dict:
         },
     }
     if live:
-        report["liveMcp"] = redact_str(live_mcp())
+        report["liveMcp"] = redact_str(live_mcp_out)
     order = {"error": 0, "warn": 1, "info": 2}
     report["issues"] = sorted(issues, key=lambda i: order.get(i["level"], 3))
     return report
 
 
 UI_FILE = Path(__file__).with_name("cc_inspector_ui.html")
+DISABLED_DIR = "skills-disabled"   # sibling of skills/; Claude Code doesn't load it
 
 
-def render_html(rep: dict, live: bool) -> str:
+def render_html(rep: dict, live: bool, token: str = "") -> str:
     data = json.dumps(rep, default=str).replace("</", "<\\/")
-    return UI_FILE.read_text().replace("__DATA__", data).replace("__LIVE__", "true" if live else "false")
+    return (UI_FILE.read_text().replace("__DATA__", data).replace("__LIVE__", "true" if live else "false")
+            .replace("__TOKEN__", token))
+
+
+# ───────────────────────── actions (--serve only) ─────────────────────────
+
+ACTION_LOCK = threading.Lock()
+
+
+def trash(p: Path) -> str:
+    """Move a file/folder (or symlink) to the system Trash so it can be restored."""
+    stamp = dt.datetime.now().strftime("%Y%m%d-%H%M%S")
+    if sys.platform == "darwin":
+        dest_dir = HOME / ".Trash"
+    elif sys.platform.startswith("linux"):
+        dest_dir = Path(os.environ.get("XDG_DATA_HOME", HOME / ".local/share")) / "Trash/files"
+    else:
+        dest_dir = CLAUDE_DIR / ".cci-trash"
+    dest_dir.mkdir(parents=True, exist_ok=True)
+    dest = dest_dir / p.name
+    if dest.exists() or dest.is_symlink():
+        dest = dest_dir / f"{p.name} {stamp}"
+    shutil.move(str(p), str(dest))
+    if sys.platform.startswith("linux"):
+        from urllib.parse import quote
+        info = dest_dir.parent / "info"
+        info.mkdir(exist_ok=True)
+        (info / (dest.name + ".trashinfo")).write_text(
+            f"[Trash Info]\nPath={quote(str(p))}\nDeletionDate={dt.datetime.now().strftime('%Y-%m-%dT%H:%M:%S')}\n")
+    return short(dest)
+
+
+def edit_settings(path: Path, change) -> str:
+    """Apply `change(data)` to a settings JSON file atomically. Keeps ONE backup (<file>.cci-backup)."""
+    raw = path.read_text(encoding="utf-8")
+    data = json.loads(raw)
+    change(data)
+    backup = path.with_name(path.name + ".cci-backup")
+    backup.write_text(raw, encoding="utf-8")
+    tmp = path.with_name(path.name + ".cci-tmp")
+    tmp.write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+    shutil.copymode(path, tmp)
+    os.replace(tmp, path)
+    return short(backup)
+
+
+class Stale(Exception):
+    pass
+
+
+def cli(args: list[str], cwd: str | None = None, timeout: int = 180) -> tuple[bool, str]:
+    exe = shutil.which("claude")
+    if not exe:
+        return False, "The `claude` command isn't on your PATH."
+    try:
+        r = subprocess.run([exe] + args, capture_output=True, text=True, timeout=timeout,
+                           cwd=cwd if cwd and os.path.isdir(cwd) else None, stdin=subprocess.DEVNULL)
+    except subprocess.TimeoutExpired:
+        return False, f"`claude {' '.join(args)}` timed out after {timeout}s."
+    out = "\n".join(x for x in (r.stdout.strip(), r.stderr.strip()) if x)
+    return r.returncode == 0, redact_str(out)[-4000:]
+
+
+def do_action(kind: str, ref: str, action: str, project: Path | None) -> tuple[bool, str, str]:
+    """Run one action on one item. Returns (ok, message, command output).
+    The item is looked up again in a fresh scan, so the browser can only act on things
+    the scanner found, and only with the actions the scanner allowed for them."""
+    rep = build(project, False)
+    pools = {"plugin": rep["plugins"], "mcp": rep["mcp"], "skill": rep["skills"], "item": rep["items"],
+             "hook": rep["hooks"], "rule": rep["permissions"]["rules"]}
+    rec = next((r for r in pools.get(kind, []) if r.get("ref") == ref), None)
+    if rec is None:
+        return False, "That item is no longer there. Click Rescan and try again.", ""
+    if action not in (rec.get("act") or []):
+        return False, f"“{action}” isn't available for this item.", ""
+
+    if kind == "plugin":
+        args = ["plugin", action, rec["id"]]
+        if not rec.get("builtin") and rec.get("scope") in ("user", "project", "local"):
+            args += ["-s", rec["scope"]]
+        ok, out = cli(args + ["--json"], cwd=rec.get("projectPath"))
+        verb = {"enable": "Turned on", "disable": "Turned off", "update": "Updated", "uninstall": "Uninstalled"}[action]
+        if ok:
+            tail = " Start a new Claude Code session to apply it." if action in ("update", "enable", "disable") else ""
+            return True, f"{verb} {rec['id']}.{tail}", out
+        if action == "update" and "accept" in out.lower():
+            return False, f"This update wants you to approve a command first. Run it in a terminal: claude plugin update {rec['id']}", out
+        return False, f"Couldn't {action} {rec['id']}.", out
+
+    if kind == "mcp":
+        name = rec["cliName"]
+        if action == "remove":
+            ok, out = cli(["mcp", "remove", rec["name"], "-s", rec["scope"]], cwd=rec.get("projectPath"))
+            return ok, (f"Removed MCP server {rec['name']} ({rec['scope']})." if ok else f"Couldn't remove {rec['name']}."), out
+        if action == "logout":
+            ok, out = cli(["mcp", "logout", name])
+            return ok, (f"Signed out of {name}." if ok else f"Couldn't sign out of {name}."), out
+        if action == "login":
+            exe = shutil.which("claude")
+            if not exe:
+                return False, "The `claude` command isn't on your PATH.", ""
+            proc = subprocess.Popen([exe, "mcp", "login", name], stdin=subprocess.DEVNULL,
+                                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
+            threading.Timer(600, lambda: proc.poll() is None and proc.kill()).start()
+            return True, f"Your browser should open to sign in to {name}. Finish there, then click Rescan.", ""
+
+    if kind == "skill":
+        src = full(rec["dir"])
+        if action == "delete":
+            return True, f"Moved skill {rec['name']} to the Trash ({trash(src)}).", ""
+        dest_parent = src.parent.parent / (DISABLED_DIR if action == "disable" else "skills")
+        dest = dest_parent / src.name
+        if dest.exists() or dest.is_symlink():
+            return False, f"{short(dest)} already exists, so the skill wasn't moved.", ""
+        dest_parent.mkdir(parents=True, exist_ok=True)
+        shutil.move(str(src), str(dest))
+        return True, (f"Turned off {rec['name']}: moved it to {short(dest)}." if action == "disable"
+                      else f"Turned on {rec['name']}: moved it back to {short(dest)}."), ""
+
+    if kind == "item":
+        return True, f"Moved {rec['kind']} {rec['name']} to the Trash ({trash(full(rec['path']))}).", ""
+
+    if kind == "hook":
+        file, event, gi, hi, want = ref.rsplit("|", 4)
+        gi, hi = int(gi), int(hi)
+
+        def change(data):
+            if event == "statusLine":
+                if fp(data.get("statusLine")) != want:
+                    raise Stale()
+                del data["statusLine"]
+                return
+            try:
+                groups = data["hooks"][event]
+                hook = groups[gi]["hooks"][hi]
+            except (KeyError, IndexError, TypeError):
+                raise Stale()
+            if fp(hook) != want:
+                raise Stale()
+            del groups[gi]["hooks"][hi]
+            if not groups[gi]["hooks"]:
+                del groups[gi]
+            if not groups:
+                del data["hooks"][event]
+            if not data["hooks"]:
+                del data["hooks"]
+        try:
+            b = edit_settings(Path(file), change)
+        except Stale:
+            return False, "That hook changed since the last scan. Click Rescan and try again.", ""
+        return True, f"Removed the {event} hook from {short(file)}. The old file is saved as {b}.", ""
+
+    if kind == "rule":
+        file, rkind, idx, want = ref.rsplit("|", 3)
+        idx = int(idx)
+
+        def change(data):
+            try:
+                lst = data["permissions"][rkind]
+                if fp(lst[idx]) != want:
+                    raise Stale()
+            except (KeyError, IndexError, TypeError):
+                raise Stale()
+            del lst[idx]
+            if not lst:
+                del data["permissions"][rkind]
+        try:
+            b = edit_settings(Path(file), change)
+        except Stale:
+            return False, "That rule changed since the last scan. Click Rescan and try again.", ""
+        return True, f"Removed the {rkind} rule from {short(file)}. The old file is saved as {b}.", ""
+
+    return False, "Unknown action.", ""
 
 
 # ───────────────────────── local app (--serve) ─────────────────────────
@@ -658,11 +897,13 @@ def safe_path(raw: str, project: Path | None) -> Path | None:
     return p
 
 
-def serve(port: int, open_browser: bool, default_project: Path | None):
+def serve(port: int, open_browser: bool, default_project: Path | None, read_only: bool = False):
     from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
     from urllib.parse import parse_qs, urlparse
 
     allowed_hosts = {f"127.0.0.1:{port}", f"localhost:{port}"}
+    allowed_origins = {f"http://{h}" for h in allowed_hosts}
+    token = "" if read_only else secrets.token_urlsafe(24)   # per-run; only our own page knows it
 
     class H(BaseHTTPRequestHandler):
         def log_message(self, *a):
@@ -689,7 +930,8 @@ def serve(port: int, open_browser: bool, default_project: Path | None):
                 rep = build(proj, q.get("live") == "1")
                 rep["knownProjects"] = [{"full": x, "short": short(x)} for x in known_projects()]
                 rep["projectFull"] = str(proj) if proj else ""
-                return self.send(200, render_html(rep, True), "text/html; charset=utf-8")
+                rep["actionsEnabled"] = not read_only
+                return self.send(200, render_html(rep, True, token), "text/html; charset=utf-8")
             if u.path in ("/api/file", "/api/ls"):
                 p = safe_path(q.get("path", ""), proj)
                 if not p or not p.exists():
@@ -722,9 +964,39 @@ def serve(port: int, open_browser: bool, default_project: Path | None):
                 return self.send(200, json.dumps({"path": short(p), "content": text, "truncated": p.stat().st_size > 300_000}))
             self.send(404, '{"error":"not found"}')
 
+        def do_POST(self):
+            # Changes are only accepted from our own page: right host, right origin, per-run token, JSON body.
+            if self.headers.get("Host") not in allowed_hosts:
+                return self.send(403, '{"error":"bad host"}')
+            if self.headers.get("Origin") not in allowed_origins:
+                return self.send(403, '{"error":"bad origin"}')
+            if read_only or not token or not secrets.compare_digest(self.headers.get("X-CCI-Token", ""), token):
+                return self.send(403, '{"error":"Actions are turned off (read-only mode, or the page is out of date: reload it)."}')
+            if urlparse(self.path).path != "/api/action" or "application/json" not in (self.headers.get("Content-Type") or ""):
+                return self.send(404, '{"error":"not found"}')
+            n = int(self.headers.get("Content-Length") or 0)
+            if n > 20_000:
+                return self.send(413, '{"error":"too large"}')
+            try:
+                body = json.loads(self.rfile.read(n) or b"{}")
+            except Exception:
+                return self.send(400, '{"error":"bad json"}')
+            proj = default_project
+            if body.get("project"):
+                proj = Path(body["project"]) if body["project"] in known_projects() else None
+            with ACTION_LOCK:
+                try:
+                    ok, msg, out = do_action(str(body.get("kind")), str(body.get("ref")), str(body.get("action")), proj)
+                except Exception as e:  # never leave the user guessing
+                    ok, msg, out = False, f"Something went wrong: {e}", ""
+            stamp = dt.datetime.now().strftime("%H:%M:%S")
+            print(f"[{stamp}] {'OK ' if ok else 'ERR'} {body.get('action')} {body.get('kind')}: {msg}")
+            self.send(200 if ok else 400, json.dumps({"ok": ok, "message": msg, "output": out}))
+
     srv = ThreadingHTTPServer(("127.0.0.1", port), H)
     url = f"http://127.0.0.1:{port}/"
-    print(f"Claude Code Inspector running at {url}  (Ctrl+C to stop)")
+    print(f"Claude Code Inspector running at {url}  (Ctrl+C to stop)"
+          + ("  [read-only]" if read_only else "  — actions enabled; use --read-only to turn them off"))
     if open_browser:
         threading.Timer(0.5, webbrowser.open, [url]).start()
     try:
@@ -734,9 +1006,10 @@ def serve(port: int, open_browser: bool, default_project: Path | None):
 
 
 def main():
-    ap = argparse.ArgumentParser(description="Audit your Claude Code install (read-only).")
-    ap.add_argument("--serve", action="store_true", help="Run as a local app (rescan button, file viewer)")
+    ap = argparse.ArgumentParser(description="Audit and manage your Claude Code install.")
+    ap.add_argument("--serve", action="store_true", help="Run as a local app (rescan, file viewer, actions)")
     ap.add_argument("--port", type=int, default=8765)
+    ap.add_argument("--read-only", action="store_true", help="With --serve: hide all buttons that change anything")
     ap.add_argument("--project", help="Also scan this project folder's .claude/, .mcp.json and CLAUDE.md")
     ap.add_argument("--out", default="claude-code-report", help="Output file stem (default: claude-code-report)")
     ap.add_argument("--live", action="store_true", help="Also run `claude mcp list` for live connection status")
@@ -747,7 +1020,7 @@ def main():
 
     project = Path(a.project).expanduser().resolve() if a.project else None
     if a.serve:
-        return serve(a.port, not a.no_open, project)
+        return serve(a.port, not a.no_open, project, a.read_only)
     rep = build(project, a.live)
 
     jpath = Path(a.out + ".json")

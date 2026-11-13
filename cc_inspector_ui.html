@@ -76,6 +76,19 @@ pre{margin:0;padding:14px;background:var(--panel2);overflow:auto;font:12px/1.5 u
 .ls .sz{margin-left:auto;color:var(--mute);font-size:12px}
 .note{padding:10px 14px;border-radius:10px;background:var(--infobg);color:var(--info);font-size:13px;margin-top:14px}
 .empty{padding:16px;color:var(--mute)}
+.acts{display:flex;flex-wrap:wrap;gap:8px;margin:14px 0 4px}
+.btn.danger{color:var(--err);border-color:color-mix(in srgb,var(--err) 45%,var(--line))}.btn.danger:hover{background:var(--errbg)}
+.btn.go{color:var(--ok);border-color:color-mix(in srgb,var(--ok) 45%,var(--line))}.btn.go:hover{background:var(--okbg)}
+.btn:disabled{opacity:.55;cursor:default}
+dialog{border:1px solid var(--line);border-radius:14px;padding:0;background:var(--panel);color:var(--ink);width:min(480px,calc(100% - 32px));box-shadow:var(--shadow)}
+dialog::backdrop{background:rgba(0,0,0,.35)}
+.dlg{padding:20px}.dlg h4{margin:0 0 8px;font-size:16px}.dlg p{margin:0 0 12px;color:var(--mute)}
+.dlg pre{border-radius:8px;margin-bottom:14px;max-height:160px}.dlg .row{display:flex;gap:8px;justify-content:flex-end}
+.btn.primary.danger{background:var(--err);border-color:var(--err);color:#fff}
+#toast{position:fixed;left:50%;bottom:22px;transform:translate(-50%,20px);opacity:0;transition:.2s;z-index:20;max-width:min(560px,calc(100% - 32px));
+ background:var(--ink);color:var(--bg);padding:11px 16px;border-radius:10px;box-shadow:var(--shadow);font-size:13.5px;pointer-events:none}
+#toast.show{opacity:1;transform:translate(-50%,0);pointer-events:auto}#toast.bad{background:var(--err);color:#fff}
+#toast details{margin-top:6px}#toast pre{background:rgba(0,0,0,.25);color:inherit;max-height:180px;margin-top:6px;border-radius:6px}
 @media (max-width:820px){
  .app{grid-template-columns:1fr}
  .side{position:sticky;top:0;height:auto;z-index:5;padding:10px 12px;border-right:0;border-bottom:1px solid var(--line)}
@@ -105,9 +118,13 @@ pre{margin:0;padding:14px;background:var(--panel2);overflow:auto;font:12px/1.5 u
  </main>
 </div>
 <div id="scrim" onclick="closeD()"></div>
+<dialog id="cdlg"><div class="dlg"><h4 id="cTitle"></h4><p id="cText"></p><pre id="cCmd"></pre>
+ <div class="row"><button class="btn" onclick="cdlg.close()">Cancel</button><button class="btn primary" id="cGo">Confirm</button></div></div></dialog>
+<div id="toast" role="status" aria-live="polite"></div>
 <aside id="drawer" aria-label="Details"><div class="dh"><div class="t"><b id="dtitle"></b><span class="sub" id="dsub"></span></div><button class="x" onclick="closeD()" aria-label="Close">✕</button></div><div id="dbody"></div></aside>
 <script>
-const R = __DATA__, LIVE = __LIVE__;
+const R = __DATA__, LIVE = __LIVE__, TOKEN = "__TOKEN__";
+const CAN = LIVE && TOKEN.length > 10 && R.actionsEnabled === true;
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 const pill = (t, c) => `<span class="pill ${c}">${esc(t)}</span>`;
@@ -142,7 +159,7 @@ $("#ver").textContent = R.install.version || "claude not found";
 $("#scanned").textContent = "Scanned " + R.generatedAt + (R.project ? " · " + R.project : "");
 if (!LIVE) { $("#liveBtn").style.display = "none"; $("#rescanBtn").title = "Static report: run `python3 cc_inspector.py --serve` for live rescans"; }
 $("#foot").innerHTML = LIVE ? `Project to include<select onchange="pickProject(this.value)"><option value="">None (global only)</option>${(R.knownProjects||[]).map(p=>`<option value="${esc(p.full)}" ${p.full===R.projectFull?"selected":""}>${esc(p.short)}</option>`).join("")}</select>
- <div style="margin-top:10px">Read-only. Secrets are hidden.</div>` : `Static snapshot.<br>Run <code>python3 cc_inspector.py --serve</code> for the live app with file viewer.`;
+ <div style="margin-top:10px">${R.actionsEnabled ? "Click any item to manage it. Every change asks first." : "Read-only mode."} Secrets are hidden.</div>` : `Static snapshot.<br>Run <code>python3 cc_inspector.py --serve</code> for the live app with file viewer.`;
 function pickProject(p){ const u = new URL(location.href); if (p) u.searchParams.set("project", p); else u.searchParams.delete("project"); location.href = u; }
 function rescan(live){ if (!LIVE) { location.reload(); return; } const u = new URL(location.href); if (live) u.searchParams.set("live","1"); else u.searchParams.delete("live");
  const b = live ? $("#liveBtn") : $("#rescanBtn"); b.textContent = live ? "Checking… (up to 1 min)" : "Scanning…"; b.disabled = true; location.href = u; }
@@ -221,7 +238,7 @@ const VIEWS = {
   return (R.liveMcp ? "" : LIVE ? `<div class="note" style="margin:0 0 12px">“Command” only checks that the program exists. Click <b>Check MCP connections</b> to test real connections.</div>` : "")
   + table([
    ["Server", r => `<b>${esc(r.name)}</b>`], ["From", r => `<span class="mono">${esc(r.source)}</span>`],
-   ["Type", r => esc(r.type)], ["State", r => onoff(r.enabled)], ["Command", r => okc(r.ok)],
+   ["Type", r => esc(r.type)], ["State", r => onoff(r.enabled)], ["Command", r => okc(r.ok)], ["Status", mcpStatus],
    ["Runs / URL", r => `<code>${esc(clip(r.target, 90))}</code>`],
   ], R.mcp, "mcp", true);
  },
@@ -229,7 +246,7 @@ const VIEWS = {
   const p = R.permissions;
   return `<h2>Rules from settings files</h2>` + table([
    ["Kind", r => pill(r.kind, r.kind)], ["Rule", r => `<code>${esc(r.rule)}</code>`], ["From", r => esc(r.source)],
-  ], p.rules)
+  ], p.rules, "rule")
   + `<h2>Default permission mode</h2>` + table([["Mode", r => `<b>${esc(r.mode)}</b>`], ["From", r => esc(r.source)]], p.modes)
   + `<h2>Extra folders Claude may access</h2>` + table([["Folder", r => `<code>${esc(r.dir)}</code>`], ["From", r => esc(r.source)], ["Exists", r => okc(r.exists)]], p.dirs)
   + `<div class="note">Approvals you gave inside a single project are on the <a class="lnk" onclick="go('projects')">Projects</a> tab.</div>`;
@@ -290,7 +307,7 @@ const DETAIL = {
    <h3>MCP servers (${mc.length})</h3>${links("mcp", mc, m => m.name)}
    <h3>Hooks (${hk.length})</h3>${links("hook", hk, h => h.event + (h.matcher !== "*" ? " · " + h.matcher : ""))}
    <h3>Agents & commands (${it.length})</h3>${links("item", it, x => x.name)}
-   ${p.enabled !== true && !p.builtin ? `<h3>Turn it on</h3><pre>claude plugin enable ${esc(p.id)}</pre>` : p.builtin || p.synced ? "" : `<h3>Turn it off</h3><pre>claude plugin disable ${esc(p.id)}</pre>`}`];
+   ${CAN || p.synced ? "" : p.enabled !== true && !p.builtin ? `<h3>Turn it on</h3><pre>claude plugin enable ${esc(p.id)}</pre>` : p.builtin || p.synced ? "" : `<h3>Turn it off</h3><pre>claude plugin disable ${esc(p.id)}</pre>`}`];
  },
  skill(s){
   const owner = R.plugins.find(p => p.src && p.src === s.source);
@@ -328,14 +345,81 @@ const DETAIL = {
    <h3>Remembered approvals (${p.allowedTools.length})</h3>${p.allowedTools.length ? `<pre>${p.allowedTools.map(esc).join("\n")}</pre>` : '<span class="muted">None. Approvals usually live in the project’s .claude/settings.local.json — pick it as the project in the sidebar to scan it.</span>'}`];
  },
  memory(m){ return [m.path.split("/").pop(), m.path, LIVE ? `<div id="autoF"></div>` : `<pre>${esc(m.preview)}${m.chars > 600 ? "\n…" : ""}</pre>`, () => LIVE && viewFile(reg("p", m.path), "#autoF")]; },
+ rule(r){ return [r.kind + " rule", "from " + r.source + " settings", `<pre>${esc(r.rule)}</pre>
+   <p class="count">${r.kind === "allow" ? "Claude can do this without asking." : r.kind === "deny" ? "Claude is never allowed to do this." : "Claude always asks before doing this."}</p>`]; },
  settings(s){ return [s.scope + " settings", s.path, `<pre>${esc(JSON.stringify(s.data, null, 2))}</pre><p class="count">env values are hidden.</p>`]; },
 };
+
+/* ── actions ── */
+const mcpStatus = m => m.live ? pill(m.live.text || m.live.status, {connected: "on-p", auth: "warn", failed: "error"}[m.live.status] || "off-p")
+  : m.needsAuth ? pill("needs sign-in", "warn") : '<span class="muted">—</span>';
+const q = s => /^[\w@:.\/-]+$/.test(s) ? s : "'" + s.replace(/'/g, "'\\''") + "'";
+const ACT = {
+ plugin: {
+  enable:    o => ["Turn on", "go", `Turn on ${o.id}? Its skills, MCP servers and hooks load in new Claude Code sessions.`, `claude plugin enable ${o.id}`],
+  disable:   o => ["Turn off", "", `Turn off ${o.id}? Its skills, MCP servers and hooks stop loading in new sessions. It stays installed, so you can turn it back on any time.`, `claude plugin disable ${o.id}`],
+  update:    o => ["Update", "", `Update ${o.id} to the latest version from its marketplace? Start a new session afterwards to use it.`, `claude plugin update ${o.id}`],
+  uninstall: o => ["Uninstall", "danger", `Uninstall ${o.id}? It's removed from this computer. You can install it again later with the command below, minus “un”.`, `claude plugin uninstall ${o.id}`],
+ },
+ mcp: {
+  login:  o => ["Sign in", "go", `Sign in to ${o.cliName}? Your browser opens so you can approve access.`, `claude mcp login ${q(o.cliName)}`],
+  logout: o => ["Sign out", "", `Forget the saved sign-in for ${o.cliName}? Claude can't use it until you sign in again.`, `claude mcp logout ${q(o.cliName)}`],
+  remove: o => ["Remove", "danger", `Remove the MCP server ${o.name} from your ${o.scope} config? Its settings, including any env values and headers, are deleted and can't be restored from here.`, `claude mcp remove ${q(o.name)} -s ${o.scope}`],
+ },
+ skill: {
+  disable: o => ["Turn off", "", `Turn off ${o.name}? Its folder moves to “skills-disabled” next to “skills”, so Claude Code stops loading it. Turn it on again here any time.`, `move ${o.dir}  →  …/skills-disabled/`],
+  enable:  o => ["Turn on", "go", `Turn on ${o.name}? Its folder moves back into “skills”.`, `move ${o.dir}  →  …/skills/`],
+  delete:  o => ["Delete", "danger", `Move ${o.name} to the Trash? You can restore it from the Trash if you change your mind.`, `move ${o.dir}  →  Trash`],
+ },
+ item: { delete: o => ["Delete", "danger", `Move the ${o.kind} ${o.name} to the Trash? You can restore it from the Trash.`, `move ${o.path}  →  Trash`] },
+ hook: { remove: o => ["Remove hook", "danger", `Remove this ${o.event} hook from your ${o.source.replace("settings:", "")} settings? A copy of the file as it was is saved next to it with “.cci-backup” at the end.`, o.command] },
+ rule: { remove: o => ["Remove rule", "danger", `Remove this ${o.kind} rule from your ${o.source} settings? A copy of the file as it was is saved next to it with “.cci-backup” at the end.`, o.rule] },
+};
+function actionsBlock(kind, o){
+ const acts = (o.act || []).filter(a => ACT[kind] && ACT[kind][a]);
+ if (!LIVE) return "";
+ if (!acts.length) return o.manageNote ? `<div class="note" style="margin-top:14px">${esc(o.manageNote)}</div>` : "";
+ if (!CAN) return `<div class="count" style="margin-top:12px">Actions are off (started with <code>--read-only</code>).</div>`;
+ return `<div class="acts">${acts.map(a => { const [label, style] = ACT[kind][a](o);
+  return `<button class="btn ${style}" onclick="askAction(${reg("act", [kind, o, a])})">${esc(label)}</button>`; }).join("")}</div>`;
+}
+function askAction(i){
+ const [kind, o, a] = REG[i][1], [label, style, text, cmd] = ACT[kind][a](o);
+ $("#cTitle").textContent = label + "?"; $("#cText").textContent = text; $("#cCmd").textContent = cmd;
+ const go = $("#cGo"); go.textContent = label; go.className = "btn primary " + (style === "danger" ? "danger" : ""); go.disabled = false;
+ go.onclick = () => runAction(kind, o, a, label);
+ $("#cdlg").showModal();
+}
+async function runAction(kind, o, a, label){
+ const go = $("#cGo"); go.disabled = true; go.textContent = "Working…";
+ let r;
+ try {
+  const res = await fetch("/api/action", {method: "POST", headers: {"Content-Type": "application/json", "X-CCI-Token": TOKEN},
+   body: JSON.stringify({kind, ref: o.ref, action: a, project: R.projectFull || ""})});
+  r = await res.json().catch(() => ({ok: false, message: "The app didn't answer properly (HTTP " + res.status + ")."}));
+  if (r.error) r = {ok: false, message: r.error};
+ } catch (e) { r = {ok: false, message: "Couldn't reach the app. Is it still running?"}; }
+ $("#cdlg").close();
+ if (r.ok) {
+  try { sessionStorage.setItem("cci-flash", JSON.stringify(r)); } catch (e) {}
+  location.reload();
+ } else toast(r, true);
+}
+let toastT;
+function toast(r, bad){
+ const t = $("#toast");
+ t.innerHTML = esc(r.message) + (r.output ? `<details><summary>Details</summary><pre>${esc(r.output)}</pre></details>` : "");
+ t.className = "show" + (bad ? " bad" : ""); clearTimeout(toastT);
+ toastT = setTimeout(() => t.className = "", bad || r.output ? 12000 : 6000);
+ t.onclick = () => { clearTimeout(toastT); };
+}
+try { const f = sessionStorage.getItem("cci-flash"); if (f) { sessionStorage.removeItem("cci-flash"); setTimeout(() => toast(JSON.parse(f)), 300); } } catch (e) {}
 
 function openD(i){
  const [kind, o] = REG[i];
  const [t, sub, body, after] = DETAIL[kind](o);
  $("#dtitle").textContent = t; $("#dsub").textContent = sub || "";
- $("#dbody").innerHTML = body + `<div id="fv"></div>`; $("#dbody").scrollTop = 0;
+ $("#dbody").innerHTML = actionsBlock(kind, o) + body + `<div id="fv"></div>`; $("#dbody").scrollTop = 0;
  document.body.classList.add("open");
  if (after) after();
 }

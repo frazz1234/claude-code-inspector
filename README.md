@@ -1,9 +1,9 @@
 # Claude Code Inspector
 
-See everything that's installed in your [Claude Code](https://claude.com/claude-code) setup on one page: plugins, skills, MCP servers, hooks, permissions, agents, slash commands and memory files. It also runs health checks that find broken or messy config.
+See and manage everything that's installed in your [Claude Code](https://claude.com/claude-code) setup on one page: plugins, skills, MCP servers, hooks, permissions, agents, slash commands and memory files. It also runs health checks that find broken or messy config.
 
 - **One Python file.** No dependencies, nothing to install.
-- **Read-only.** It never changes your config.
+- **Safe changes.** Turn things on or off, update, sign in, remove, delete. Every change asks you first, uses the official `claude` CLI where one exists, and can be undone where possible. Use `--read-only` to just look.
 - **Private.** It runs only on your computer and sends nothing anywhere. Secret values (env vars, headers, tokens) are hidden in everything it shows.
 
 ## Quick start
@@ -37,6 +37,26 @@ Click any row to open its details. A plugin's details list all its skills, MCP s
 
 The **Rescan** button reads your config again. **Check MCP connections** runs `claude mcp list` to show which servers actually connect. The **project picker** in the sidebar adds one of your projects to the scan.
 
+## Managing your setup
+
+Open any item and use the buttons at the top of its details. Each one shows what will happen and the exact command it runs, and waits for you to confirm.
+
+| Item | Actions | How it's done |
+| --- | --- | --- |
+| **Plugin** | Turn on / Turn off, Update, Uninstall | `claude plugin enable` / `disable` / `update` / `uninstall` |
+| **MCP server** | Sign in, Sign out, Remove | `claude mcp login` / `logout` / `remove`. Sign in opens your browser. Servers from plugins are removed by turning off their plugin. |
+| **Skill** (yours or your project's) | Turn off / Turn on, Delete | Turn off moves the folder to `skills-disabled/` next to `skills/`, so Claude Code stops loading it, and Turn on moves it back. Delete moves it to the Trash. |
+| **Agent / slash command** (yours or your project's) | Delete | Moves the file to the Trash |
+| **Hook / status line** (in a settings file) | Remove | Edits that settings file |
+| **Permission rule** | Remove | Edits that settings file |
+
+- **Plugin parts** (a plugin's skills, MCP servers, hooks and commands) are managed by turning the whole plugin on or off.
+- **Synced from claude.ai:** plugins and skills synced from your claude.ai account are managed in claude.ai. The app shows them but doesn't change them.
+- **Managed settings** set by your organization are never changed.
+- **Settings edits** are written all at once, so a half-written file can't happen, and the previous version is kept as `settings.json.cci-backup`. That's one backup per file, overwritten each time, so backups don't pile up.
+- **Trash:** files go to the system Trash on macOS and Linux. On Windows they go to `~/.claude/.cci-trash`.
+- **Restart:** start a new Claude Code session to pick up changes.
+
 ### Health checks
 
 - An MCP server or hook calls a program that isn't installed
@@ -56,6 +76,7 @@ python3 cc_inspector.py --project ~/code/app  # also scan a project's .claude/, 
 python3 cc_inspector.py --live                # also run `claude mcp list` (slower)
 python3 cc_inspector.py --json-only --no-open # just the JSON, e.g. for scripts or CI
 python3 cc_inspector.py --serve --port 9000   # the app on another port
+python3 cc_inspector.py --serve --read-only    # the app without any buttons that change things
 ```
 
 The one-file report works without a server, but it can't open files or rescan.
@@ -78,6 +99,8 @@ If you set `CLAUDE_CONFIG_DIR`, it reads that folder instead of `~/.claude`.
 ## Safety
 
 - The app only accepts connections from your own computer (`127.0.0.1`). It also rejects requests sent with another host name, which blocks DNS-rebinding attacks.
+- Changes are only accepted from the app's own page. Each request needs a secret token that's created fresh every time the app starts, and must come from the app's own address. Other websites open in your browser can't make changes.
+- The app never acts on a file path sent by the browser. It scans your config again, looks the item up, and only runs actions the scanner allows for that item. If the item changed since your last scan (say, another tool edited your settings), the action is refused, so you never delete the wrong thing.
 - The file viewer only opens files inside `~/.claude` (and the project you picked). It refuses `../` escapes and files whose names look like credentials, keys or `.env` files.
 - In JSON files, the values of env vars and headers, and of any key that looks secret, are hidden. Values that look like tokens are hidden in every file.
 
