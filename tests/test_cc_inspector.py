@@ -200,7 +200,51 @@ class TestActions(FakeHome):
         self.assertFalse(ci.do_action("mcp", mcp["ref"], "login", None)[0])   # stdio servers can't log in
 
 
+class TestAssistant(FakeHome):
+    def test_snapshot_has_refs_and_no_secrets(self):
+        snap = ci.assistant_snapshot(self.scan())
+        data = json.loads(snap)
+        self.assertTrue(all("ref" in s and "act" in s for s in data["skills"]))
+        for secret in ("sk-should-never-appear", "secret-value-123", "sk-abcdefghijklmnop"):
+            self.assertNotIn(secret, snap)
+
+    def test_command_is_locked_down(self):
+        cmd = ci.assistant_cmd("/tmp/prompt.txt")
+        for flag in ("-p", "--safe-mode", "--restricted", "--strict-mcp-config", "--no-session-persistence"):
+            self.assertIn(flag, cmd)
+        self.assertEqual(cmd[cmd.index("--tools") + 1], "Read,Glob,Grep")     # read-only tools only
+        self.assertNotIn("--dangerously-skip-permissions", cmd)
+        self.assertIn("Read(~/.claude/.credentials.json)", cmd)
+
+    def test_system_prompt_formats(self):
+        rep = self.scan()
+        text = ci.ASSISTANT_RULES.format(claude_dir="~/.claude", when=rep["generatedAt"], snapshot=ci.assistant_snapshot(rep))
+        self.assertIn("cci-action", text)
+        self.assertIn('"name":"hello"', text)
+
+
 class TestParsing(unittest.TestCase):
+    def test_assistant_prompt(self):
+        self.assertEqual(ci.assistant_prompt([{"role": "user", "text": "hi"}]), "hi")
+        p = ci.assistant_prompt([{"role": "user", "text": "a"}, {"role": "assistant", "text": "b"}, {"role": "user", "text": "c"}])
+        self.assertIn("User: a", p)
+        self.assertIn("You: b", p)
+        self.assertTrue(p.endswith("c"))
+        with self.assertRaises(ValueError):
+            ci.assistant_prompt([{"role": "assistant", "text": "x"}])
+
+    def test_translate_events(self):
+        tr = ci.translate_event
+        self.assertEqual(tr({"type": "system", "subtype": "init", "model": "m"}), [{"t": "model", "d": "m"}])
+        self.assertEqual(tr({"type": "stream_event", "event": {"type": "content_block_delta", "delta": {"type": "text_delta", "text": "Hi"}}}),
+                         [{"t": "text", "d": "Hi"}])
+        self.assertEqual(tr({"type": "stream_event", "event": {"type": "content_block_delta", "delta": {"type": "thinking_delta"}}}), [])
+        tool = tr({"type": "assistant", "message": {"content": [{"type": "tool_use", "name": "Read", "input": {"file_path": "/x/SKILL.md"}}]}})
+        self.assertEqual(tool[0]["t"], "tool")
+        self.assertIn("SKILL.md", tool[0]["d"])
+        self.assertEqual(tr({"type": "result", "subtype": "success", "duration_ms": 5})[0]["t"], "done")
+        self.assertEqual(tr({"type": "result", "subtype": "error_max_turns", "is_error": True})[0]["t"], "error")
+
     def test_parse_mcp_list(self):
         out = ci.parse_mcp_list(
             "Checking MCP server health…\n\n"

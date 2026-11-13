@@ -6,6 +6,7 @@
 See and manage everything that's installed in your [Claude Code](https://claude.com/claude-code) setup on one page: plugins, skills, MCP servers, hooks, permissions, agents, slash commands and memory files. It also runs health checks that find broken or messy config.
 
 - **One Python file.** No dependencies, nothing to install.
+- **Ask Claude.** Chat with Claude about your setup ("what's broken?", "what can I clean up?"). It uses your existing Claude subscription through Claude Code, so there's no API key. It can read your config but can't change anything; its suggestions become buttons you confirm.
 - **Safe changes.** Turn things on or off, update, sign in, remove, delete. Every change asks you first, uses the official `claude` CLI where one exists, and can be undone where possible. Use `--read-only` to just look.
 - **Private.** It runs only on your computer and sends nothing anywhere. Secret values (env vars, headers, tokens) are hidden in everything it shows.
 
@@ -60,6 +61,28 @@ Open any item and use the buttons at the top of its details. Each one shows what
 - **Trash:** files go to the system Trash on macOS and Linux. On Windows they go to `~/.claude/.cci-trash`.
 - **Restart:** start a new Claude Code session to pick up changes.
 
+## Ask Claude
+
+Click **✦ Ask Claude** (or **Ask Claude about this** on any item) and ask in your own words:
+
+- "Is anything broken in my setup? What should I fix first?"
+- "Why can't my instagram MCP server connect?"
+- "Which plugins do I never use? Help me clean up."
+- "What does the hook on PreToolUse do?"
+
+Claude gets a summary of what the app found, with secret values hidden. When it needs more detail, it can open files in your Claude config folder, such as a `SKILL.md`, a `plugin.json` or a hook script, and the chat shows each file it opens. When it suggests a change, the answer includes a button like **Turn off: cache-tax**. Clicking it opens the same confirm dialog as everywhere else, and nothing changes until you confirm.
+
+**How it works:** the app runs `claude -p` in the background with your normal Claude Code login, so it uses your Claude subscription (or whatever login Claude Code uses) and your default model. It's locked down:
+
+| Setting | Effect |
+| --- | --- |
+| `--safe-mode` | Your hooks, plugins, MCP servers and `CLAUDE.md` aren't loaded, so asking a question doesn't trigger anything |
+| `--restricted --tools Read,Glob,Grep` | Claude can only read files, only inside your Claude config folder, and can't run commands |
+| `--disallowedTools Read(~/.claude/.credentials.json) …` | Credential and key files are off limits |
+| `--no-session-persistence` | Chats aren't saved as Claude Code sessions. The chat lives in your browser tab until you click **New chat** or close the tab |
+
+To turn the assistant off, start the app with `--no-assistant`.
+
 ### Health checks
 
 - An MCP server or hook calls a program that isn't installed
@@ -80,6 +103,7 @@ python3 cc_inspector.py --live                # also run `claude mcp list` (slow
 python3 cc_inspector.py --json-only --no-open # just the JSON, e.g. for scripts or CI
 python3 cc_inspector.py --serve --port 9000   # the app on another port
 python3 cc_inspector.py --serve --read-only    # the app without any buttons that change things
+python3 cc_inspector.py --serve --no-assistant # the app without Ask Claude
 ```
 
 The one-file report works without a server, but it can't open files or rescan.
@@ -102,6 +126,7 @@ If you set `CLAUDE_CONFIG_DIR`, it reads that folder instead of `~/.claude`.
 ## Safety
 
 - The app only accepts connections from your own computer (`127.0.0.1`). It also rejects requests sent with another host name, which blocks DNS-rebinding attacks.
+- The assistant can only read files in your Claude config folder, never credential files, and can't run commands or change anything. See [Ask Claude](#ask-claude).
 - Changes are only accepted from the app's own page. Each request needs a secret token that's created fresh every time the app starts, and must come from the app's own address. Other websites open in your browser can't make changes.
 - The app never acts on a file path sent by the browser. It scans your config again, looks the item up, and only runs actions the scanner allows for that item. If the item changed since your last scan (say, another tool edited your settings), the action is refused, so you never delete the wrong thing.
 - The file viewer only opens files inside `~/.claude` (and the project you picked). It refuses `../` escapes and files whose names look like credentials, keys or `.env` files.

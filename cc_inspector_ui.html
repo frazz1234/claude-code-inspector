@@ -88,6 +88,25 @@ dialog::backdrop{background:rgba(0,0,0,.35)}
 #toast{position:fixed;left:50%;bottom:22px;transform:translate(-50%,20px);opacity:0;transition:.2s;z-index:20;max-width:min(560px,calc(100% - 32px));
  background:var(--ink);color:var(--bg);padding:11px 16px;border-radius:10px;box-shadow:var(--shadow);font-size:13.5px;pointer-events:none}
 #toast.show{opacity:1;transform:translate(-50%,0);pointer-events:auto}#toast.bad{background:var(--err);color:#fff}
+/* assistant */
+.chat{display:flex;flex-direction:column;height:calc(100vh - 110px);min-height:420px}
+#chatLog{flex:1;overflow:auto;padding:4px 2px 12px;display:flex;flex-direction:column;gap:14px}
+.msg{max-width:760px}.msg.user{align-self:flex-end;background:var(--chip);padding:9px 13px;border-radius:14px 14px 4px 14px;white-space:pre-wrap;overflow-wrap:anywhere}
+.msg.ai{align-self:stretch}.msg.ai p{margin:0 0 9px}.msg.ai ul,.msg.ai ol{margin:0 0 9px;padding-left:22px}.msg.ai h4{margin:10px 0 6px;font-size:14px}
+.msg.ai pre{border-radius:8px;margin:0 0 10px;max-height:320px}.msg.ai code{background:var(--chip);padding:1px 5px;border-radius:5px}.msg.ai pre code{background:none;padding:0}
+.msg .tools{display:flex;flex-direction:column;gap:3px;margin:0 0 8px}.msg .tools span{font-size:12px;color:var(--mute)}.msg .tools span::before{content:"↳ "}
+.msg .err{color:var(--err);background:var(--errbg);padding:8px 12px;border-radius:8px;font-size:13px}
+.typing{color:var(--mute);font-size:13px}.typing::after{content:"…";animation:blink 1s steps(3) infinite}@keyframes blink{50%{opacity:.3}}
+.sug{display:flex;flex-wrap:wrap;gap:8px;margin:6px 0 0}.sug button{border:1px solid var(--line);background:var(--panel);border-radius:999px;padding:7px 13px;cursor:pointer;font:inherit;text-align:left}
+.sug button:hover{border-color:var(--accent)}
+.hello{color:var(--mute);max-width:640px}.hello b{color:var(--ink);font-size:18px;display:block;margin-bottom:4px}
+.acard{border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin:0 0 10px;display:flex;gap:12px;align-items:center;background:var(--panel)}
+.acard .w{flex:1;min-width:0}.acard .w b{display:block}.acard .w span{color:var(--mute);font-size:12.5px}
+.compose{display:flex;gap:8px;align-items:flex-end;border:1px solid var(--line);background:var(--panel);border-radius:14px;padding:8px}
+.compose textarea{flex:1;border:0;background:none;color:var(--ink);font:inherit;resize:none;outline:none;max-height:180px;min-height:24px;padding:4px 6px}
+.chatfoot{display:flex;justify-content:space-between;gap:8px;font-size:12px;color:var(--mute);margin-top:6px}
+#askFab{position:fixed;right:22px;bottom:22px;z-index:8;border:0;background:var(--accent);color:#fff;border-radius:999px;padding:11px 18px;font-weight:600;box-shadow:var(--shadow);cursor:pointer}
+body.open #askFab,body.chatting #askFab{display:none}
 #toast details{margin-top:6px}#toast pre{background:rgba(0,0,0,.25);color:inherit;max-height:180px;margin-top:6px;border-radius:6px}
 @media (max-width:820px){
  .app{grid-template-columns:1fr}
@@ -121,6 +140,7 @@ dialog::backdrop{background:rgba(0,0,0,.35)}
 <dialog id="cdlg"><div class="dlg"><h4 id="cTitle"></h4><p id="cText"></p><pre id="cCmd"></pre>
  <div class="row"><button class="btn" onclick="cdlg.close()">Cancel</button><button class="btn primary" id="cGo">Confirm</button></div></div></dialog>
 <div id="toast" role="status" aria-live="polite"></div>
+<button id="askFab" onclick="go('assistant')" style="display:none">✦ Ask Claude</button>
 <aside id="drawer" aria-label="Details"><div class="dh"><div class="t"><b id="dtitle"></b><span class="sub" id="dsub"></span></div><button class="x" onclick="closeD()" aria-label="Close">✕</button></div><div id="dbody"></div></aside>
 <script>
 const R = __DATA__, LIVE = __LIVE__, TOKEN = "__TOKEN__";
@@ -143,6 +163,7 @@ const S = R.stats, ISS = R.issues;
 const nErr = ISS.filter(i => i.level === "error").length, nWarn = ISS.filter(i => i.level === "warn").length;
 const TABS = [
  ["overview", "Overview", ""],
+ ...(LIVE && R.assistantEnabled ? [["assistant", "Ask Claude", "✦"]] : []),
  ["issues", "Health checks", ISS.length],
  ["plugins", "Plugins", R.plugins.length],
  ["skills", "Skills", R.skills.length],
@@ -165,7 +186,7 @@ function rescan(live){ if (!LIVE) { location.reload(); return; } const u = new U
  const b = live ? $("#liveBtn") : $("#rescanBtn"); b.textContent = live ? "Checking… (up to 1 min)" : "Scanning…"; b.disabled = true; location.href = u; }
 
 document.querySelectorAll("#stSeg button").forEach(b => b.onclick = () => { state.st = b.dataset.v; save(); draw(); });
-function go(t){ state.tab = t; state.q = ""; $("#q").value = ""; save(); draw(); window.scrollTo(0, 0); }
+function go(t){ state.tab = t; state.q = ""; $("#q").value = ""; save(); draw(); window.scrollTo(0, 0); if (t === "assistant") { renderChat(); const b = $("#chatIn"); if (b) b.focus(); } }
 
 function table(cols, rows, kind, useState){
  const q = state.q.toLowerCase();
@@ -181,6 +202,14 @@ const srcOf = p => p.src || "";
 const sizeOf = p => Object.values(p.counts || {}).reduce((a, b) => a + b, 0);
 
 const VIEWS = {
+ assistant(){
+  return `<div class="chat"><div id="chatLog"></div>
+   <div class="compose"><textarea id="chatIn" rows="1" placeholder="Ask about your setup, or ask Claude to help clean it up…"
+     onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();sendChat()}" oninput="autoGrow(this)"></textarea>
+    <button class="btn primary" id="chatBtn" onclick="CHAT.busy ? stopChat() : sendChat()">Send</button></div>
+   <div class="chatfoot"><span>Uses your Claude subscription through Claude Code${CHAT.model ? " · " + esc(CHAT.model) : ""}. It can read your config but can't change anything. Every suggestion waits for your click.</span>
+    <a class="lnk" onclick="clearChat()">New chat</a></div></div>`;
+ },
  overview(){
   const cards = [
    ["issues", "Problems", nErr + nWarn, `${nErr} errors · ${nWarn} warnings`],
@@ -375,13 +404,22 @@ const ACT = {
  hook: { remove: o => ["Remove hook", "danger", `Remove this ${o.event} hook from your ${o.source.replace("settings:", "")} settings? A copy of the file as it was is saved next to it with “.cci-backup” at the end.`, o.command] },
  rule: { remove: o => ["Remove rule", "danger", `Remove this ${o.kind} rule from your ${o.source} settings? A copy of the file as it was is saved next to it with “.cci-backup” at the end.`, o.rule] },
 };
+const buttons = (kind, o) => (o.act || []).filter(a => ACT[kind] && ACT[kind][a]).map(a => { const [label, style] = ACT[kind][a](o);
+  return `<button class="btn ${style}" onclick="askAction(${reg("act", [kind, o, a])})">${esc(label)}</button>`; }).join("");
 function actionsBlock(kind, o){
- const acts = (o.act || []).filter(a => ACT[kind] && ACT[kind][a]);
  if (!LIVE) return "";
- if (!acts.length) return o.manageNote ? `<div class="note" style="margin-top:14px">${esc(o.manageNote)}</div>` : "";
- if (!CAN) return `<div class="count" style="margin-top:12px">Actions are off (started with <code>--read-only</code>).</div>`;
- return `<div class="acts">${acts.map(a => { const [label, style] = ACT[kind][a](o);
-  return `<button class="btn ${style}" onclick="askAction(${reg("act", [kind, o, a])})">${esc(label)}</button>`; }).join("")}</div>`;
+ if (!CAN) return (o.act || []).length ? `<div class="count" style="margin-top:12px">Actions are off (started with <code>--read-only</code>).</div>` : "";
+ let html = buttons(kind, o) ? `<div class="acts">${buttons(kind, o)}</div>` : "";
+ // Items that live inside a plugin: explain, and offer the plugin's own buttons right here.
+ const owner = o.source && R.plugins.find(p => p.src && p.src === o.source);
+ if (owner && kind !== "plugin") {
+  const what = {mcp: "server", skill: "skill", hook: "hook", item: o.kind || "item"}[kind] || "item";
+  html += owner.synced
+   ? `<div class="note" style="margin-top:14px">This ${what} comes from the plugin <b>${esc(owner.name)}</b>, which is synced from your claude.ai account. To remove it, turn that plugin off or remove it in claude.ai.</div>`
+   : `<div class="note" style="margin-top:14px">This ${what} comes from the plugin <a class="lnk" onclick="openD(${reg("plugin", owner)})">${esc(owner.name)}</a>. ${kind === "mcp" ? "Claude Code can't remove one server from a plugin, so to get rid of it" : "To get rid of it"}, turn off or uninstall the plugin:</div>
+      <div class="acts">${buttons("plugin", owner) || '<span class="muted">No plugin actions available.</span>'}</div>`;
+ } else if (!html && o.manageNote) html = `<div class="note" style="margin-top:14px">${esc(o.manageNote)}</div>`;
+ return html;
 }
 function askAction(i){
  const [kind, o, a] = REG[i][1], [label, style, text, cmd] = ACT[kind][a](o);
@@ -419,7 +457,9 @@ function openD(i){
  const [kind, o] = REG[i];
  const [t, sub, body, after] = DETAIL[kind](o);
  $("#dtitle").textContent = t; $("#dsub").textContent = sub || "";
- $("#dbody").innerHTML = actionsBlock(kind, o) + body + `<div id="fv"></div>`; $("#dbody").scrollTop = 0;
+ const ask = LIVE && R.assistantEnabled && ["plugin","mcp","skill","item","hook","rule"].includes(kind)
+  ? `<div style="margin-top:12px"><a class="lnk" onclick="askAbout('${kind}', ${reg(kind, o)})">✦ Ask Claude about this</a></div>` : "";
+ $("#dbody").innerHTML = actionsBlock(kind, o) + ask + body + `<div id="fv"></div>`; $("#dbody").scrollTop = 0;
  document.body.classList.add("open");
  if (after) after();
 }
@@ -452,6 +492,120 @@ async function browse(i){
 }
 function projQ(){ const p = new URL(location.href).searchParams.get("project"); return p ? "&project=" + encodeURIComponent(p) : ""; }
 
+/* ── Ask Claude ── */
+const CHAT = {msgs: [], busy: false, ctrl: null, model: ""};
+try { Object.assign(CHAT, JSON.parse(sessionStorage.getItem("cci-chat") || "{}"), {busy: false, ctrl: null}); } catch (e) {}
+const saveChat = () => { try { sessionStorage.setItem("cci-chat", JSON.stringify({msgs: CHAT.msgs.slice(-40), model: CHAT.model})); } catch (e) {} };
+const SUGGEST = [
+ "Is anything broken in my setup? What should I fix first?",
+ "Which plugins and skills do I never use? Help me clean up.",
+ "Why can't some of my MCP servers connect?",
+ "Explain my permissions and hooks in plain words.",
+];
+const POOLS = () => ({plugin: R.plugins, mcp: R.mcp, skill: R.skills, item: R.items, hook: R.hooks, rule: R.permissions.rules,
+ project: R.permissions.projects.map(p => Object.assign({ref: p.path}, p))});
+const findItem = (kind, ref) => (POOLS()[kind] || []).find(o => o.ref === ref);
+const itemName = (kind, o) => o.name || o.id || o.event || o.rule || o.path || kind;
+function autoGrow(t){ t.style.height = "auto"; t.style.height = Math.min(t.scrollHeight, 180) + "px"; }
+
+function inlineMd(t){
+ return t.replace(/`([^`]+)`/g, (m, c) => `<code>${c}</code>`)
+  .replace(/\*\*([^*]+)\*\*/g, "<b>$1</b>")
+  .replace(/\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)/g, '<a class="lnk" href="$2" target="_blank" rel="noopener noreferrer">$1</a>');
+}
+function special(lang, body){
+ let j; try { j = JSON.parse(body); } catch (e) { return `<pre><code>${esc(body)}</code></pre>`; }
+ const o = findItem(j.kind, j.ref);
+ if (lang === "cci-open") return o ? `<div class="acard"><div class="w"><b>${esc(itemName(j.kind, o))}</b><span>${esc(j.kind)}</span></div><button class="btn" onclick="openD(${reg(j.kind, o)})">Open</button></div>`
+  : `<div class="acard"><div class="w"><span>Couldn't find that item in the current scan.</span></div></div>`;
+ const def = ACT[j.kind] && ACT[j.kind][j.action];
+ if (!o || !def || !(o.act || []).includes(j.action))
+  return `<div class="acard"><div class="w"><b>Suggestion not available</b><span>${esc(j.why || "")} It doesn't match an action the app allows right now. Try Rescan.</span></div></div>`;
+ const [label, style] = def(o);
+ return `<div class="acard"><div class="w"><b>${esc(label)}: ${esc(itemName(j.kind, o))}</b><span>${esc(j.why || "")}</span></div>${
+  CAN ? `<button class="btn ${style}" onclick="askAction(${reg("act", [j.kind, o, j.action])})">${esc(label)}…</button>` : `<span class="muted">read-only</span>`}</div>`;
+}
+function md(src){
+ const out = []; const parts = String(src).split(/^```/m);
+ parts.forEach((part, i) => {
+  if (i % 2 === 1) {
+   const nl = part.indexOf("\n"), lang = (nl < 0 ? part : part.slice(0, nl)).trim(), body = nl < 0 ? "" : part.slice(nl + 1);
+   const closed = i < parts.length - 1;
+   if (lang.startsWith("cci-")) out.push(closed ? special(lang, body.trim()) : `<div class="typing">Preparing a suggestion</div>`);
+   else out.push(`<pre><code>${esc(body.replace(/\n$/, ""))}</code></pre>`);
+   return;
+  }
+  let list = null;
+  const flush = () => { if (list) { out.push(`<${list.t}>${list.items.map(x => `<li>${inlineMd(x)}</li>`).join("")}</${list.t}>`); list = null; } };
+  for (const para of esc(part).split(/\n{2,}/)) {
+   for (const line of para.split("\n")) {
+    const ul = line.match(/^\s*[-*•] (.*)/), ol = line.match(/^\s*\d+[.)] (.*)/), h = line.match(/^#{1,4} (.*)/);
+    if (ul || ol) { const t = ul ? "ul" : "ol"; if (!list || list.t !== t) { flush(); list = {t, items: []}; } list.items.push((ul || ol)[1]); continue; }
+    flush();
+    if (h) out.push(`<h4>${inlineMd(h[1])}</h4>`); else if (line.trim()) out.push(`<p>${inlineMd(line)}</p>`);
+   }
+   flush();
+  }
+ });
+ return out.join("");
+}
+function renderChat(){
+ const log = $("#chatLog"); if (!log) return;
+ const atBottom = log.scrollHeight - log.scrollTop - log.clientHeight < 80;
+ if (!CHAT.msgs.length) {
+  log.innerHTML = `<div class="hello"><b>Ask Claude about your setup</b>Claude sees a summary of everything on these pages (secrets hidden) and can open files in your Claude config folder to dig deeper. When it suggests a change, you get a button, and nothing happens until you click it.</div>
+   <div class="sug">${SUGGEST.map(q => `<button onclick="sendChat(${reg("q", q)})">${esc(q)}</button>`).join("")}</div>`;
+ } else {
+  log.innerHTML = CHAT.msgs.map((m, i) => m.role === "user" ? `<div class="msg user">${esc(m.text)}</div>` :
+   `<div class="msg ai">${(m.tools || []).length ? `<div class="tools">${m.tools.map(t => `<span>${esc(t)}</span>`).join("")}</div>` : ""}${md(m.text || "")}${
+    m.error ? `<div class="err">${esc(m.error)}</div>` : ""}${CHAT.busy && i === CHAT.msgs.length - 1 ? `<div class="typing">${m.text ? "" : "Thinking"}</div>` : ""}</div>`).join("");
+ }
+ if (atBottom || CHAT.busy) log.scrollTop = log.scrollHeight;
+ const b = $("#chatBtn"); if (b) { b.textContent = CHAT.busy ? "Stop" : "Send"; b.className = "btn " + (CHAT.busy ? "" : "primary"); }
+}
+async function sendChat(qi){
+ if (CHAT.busy) return;
+ const box = $("#chatIn"), text = (qi !== undefined ? REG[qi][1] : box.value).trim();
+ if (!text) return;
+ if (box) { box.value = ""; autoGrow(box); }
+ CHAT.msgs.push({role: "user", text});
+ const ai = {role: "assistant", text: "", tools: []}; CHAT.msgs.push(ai);
+ CHAT.busy = true; CHAT.ctrl = new AbortController(); renderChat();
+ try {
+  const res = await fetch("/api/chat", {method: "POST", signal: CHAT.ctrl.signal,
+   headers: {"Content-Type": "application/json", "X-CCI-Token": TOKEN},
+   body: JSON.stringify({project: R.projectFull || "", messages: CHAT.msgs.slice(0, -1).map(m => ({role: m.role, text: m.text}))})});
+  if (!res.ok) { const j = await res.json().catch(() => ({})); throw new Error(j.error || "HTTP " + res.status); }
+  const rd = res.body.getReader(), dec = new TextDecoder(); let buf = "";
+  for (;;) {
+   const {value, done} = await rd.read(); if (done) break;
+   buf += dec.decode(value, {stream: true});
+   let nl; while ((nl = buf.indexOf("\n")) >= 0) {
+    const line = buf.slice(0, nl); buf = buf.slice(nl + 1); if (!line.trim()) continue;
+    const ev = JSON.parse(line);
+    if (ev.t === "text") ai.text += ev.d;
+    else if (ev.t === "turn" && ai.text && !/\n\n$/.test(ai.text)) ai.text += "\n\n";
+    else if (ev.t === "tool") ai.tools.push(ev.d);
+    else if (ev.t === "model") CHAT.model = ev.d;
+    else if (ev.t === "error") ai.error = ev.d;
+    renderChat();
+   }
+  }
+ } catch (e) {
+  if (e.name === "AbortError") ai.error = ai.text ? "" : "Stopped.";
+  else ai.error = "Couldn't get an answer: " + (e.message || e);
+ }
+ CHAT.busy = false; CHAT.ctrl = null; saveChat(); renderChat();
+ const box2 = $("#chatIn"); if (box2) box2.focus();
+}
+function stopChat(){ if (CHAT.ctrl) CHAT.ctrl.abort(); }
+function clearChat(){ if (CHAT.busy) stopChat(); CHAT.msgs = []; saveChat(); renderChat(); }
+function askAbout(kind, i){
+ const o = REG[i][1]; closeD(); go("assistant");
+ const box = $("#chatIn"); box.value = `Tell me about the ${kind === "item" ? o.kind : kind} “${itemName(kind, o)}”: what it does, whether I need it, and anything I should fix.`;
+ autoGrow(box); box.focus();
+}
+
 function draw(){
  REG = [];
  if (!VIEWS[state.tab]) state.tab = "overview";
@@ -459,9 +613,12 @@ function draw(){
   t[0] === "issues" && nErr ? `<span class="dot">${nErr}</span>` : `<span class="n">${t[2]}</span>`}</button>`).join("");
  $("#title").textContent = TABS.find(t => t[0] === state.tab)[1];
  $("#stSeg").style.display = HAS_STATE.has(state.tab) ? "" : "none";
- $("#tools").style.display = state.tab === "overview" ? "none" : "";
+ $("#tools").style.display = state.tab === "overview" || state.tab === "assistant" ? "none" : "";
+ document.body.classList.toggle("chatting", state.tab === "assistant");
+ $("#askFab").style.display = LIVE && R.assistantEnabled ? "" : "none";
  document.querySelectorAll("#stSeg button").forEach(b => b.classList.toggle("on", b.dataset.v === state.st));
  $("#view").innerHTML = VIEWS[state.tab]();
 }
-draw();
+draw(); // first paint
+if (state.tab === "assistant") renderChat();
 </script></body></html>
